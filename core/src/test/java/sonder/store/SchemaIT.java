@@ -1,12 +1,10 @@
 package sonder.store;
 
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -14,7 +12,6 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -35,54 +32,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Имя класса кончается на IT, а не на Test: интеграционные тесты требуют
  * поднятой базы и потому запускаются отдельной целью ({@code ./sonder
- * java-it}), а не в каждой сборке. Базу поднимает скрипт, адрес приходит
- * системным свойством.
+ * java-it}), а не в каждой сборке. Подключение и миграции — в
+ * {@link FirebirdSupport}.
  */
-class SchemaIT {
+class SchemaIT extends FirebirdSupport {
 
-    private static String jdbcUrl;
-    private static String user;
-    private static String password;
-
-    /**
-     * База поднимается снаружи, скриптом {@code ops/ci/run-it.sh}, и её
-     * адрес приходит системным свойством. Без свойства тесты пропускаются, а
-     * не падают: запуск без базы — это «не запускали», а не «сломано», и
-     * путать эти два исхода в CI дороже, чем кажется.
-     */
     @BeforeAll
-    static void connectToDatabase() throws Exception {
-        jdbcUrl = System.getProperty("sonder.it.jdbcUrl");
-        user = System.getProperty("sonder.it.user", "sysdba");
-        password = System.getProperty("sonder.it.password", "masterkey");
-
-        assumeTrue(jdbcUrl != null && !jdbcUrl.isEmpty(),
-                "нет sonder.it.jdbcUrl — запускать через ./sonder java-it");
-
-        awaitConnectable();
-
-        Flyway.configure()
-                .dataSource(jdbcUrl, user, password)
-                .locations("classpath:db/migration")
-                .load()
-                .migrate();
-    }
-
-    private static void awaitConnectable() throws Exception {
-        SQLException last = null;
-        for (int i = 0; i < 30; i++) {
-            try (Connection c = connect()) {
-                return;
-            } catch (SQLException e) {
-                last = e;
-                Thread.sleep(1000);
-            }
-        }
-        throw new IllegalStateException("Firebird не отвечает: " + jdbcUrl, last);
-    }
-
-    private static Connection connect() throws SQLException {
-        return DriverManager.getConnection(jdbcUrl, user, password);
+    static void migrate() throws Exception {
+        prepareDatabase();
     }
 
     private static void insertUser(String id, String nick, String displayName,
