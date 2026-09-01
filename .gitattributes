@@ -1,0 +1,30 @@
+# Переводы строк.
+#
+# Разработка идёт на Windows, а исполняется всё в Linux-контейнерах.
+# Shell-скрипт с CRLF там не запускается вовсе: интерпретатор видит \r
+# частью команды. Поэтому LF принудительно для всего, что исполняется.
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.py      text eol=lf
+*.pas     text eol=lf
+*.pp      text eol=lf
+*.inc     text eol=lf
+*.java    text eol=lf
+*.idl     text eol=lf
+*.wsdl    text eol=lf
+*.xsd     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+Dockerfile     text eol=lf
+Makefile       text eol=lf
+
+# Бинарные артефакты не трогать.
+*.exe     binary
+*.EXE     binary
+*.o       binary
+*.a       binary
+*.ppu     binary
+*.png     binary

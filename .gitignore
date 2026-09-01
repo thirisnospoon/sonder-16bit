@@ -1,0 +1,28 @@
+# сборочные артефакты
+/spikes/*/out/
+/dosnode/build/out/
+*.ppu
+*.o
+*.a
+*.exe
+*.EXE
+*.map
+*.log
+
+# локальные инструменты и кэши
+/.tools/
+/.cache/
+node_modules/
+target/
+dist/
+
+# среда
+.env
+.env.local
+*.local
+
+# редакторы
+.idea/
+.vscode/
+*.swp
+.DS_Store
