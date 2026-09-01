@@ -125,7 +125,7 @@ cmd_check_drift() {
   if ! git diff --quiet -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated 2>/dev/null; then
     echo "    сгенерированный код разошёлся с контрактами:"
     git diff --stat -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated | sed 's/^/      /'
-    echo "    перегенерируй: ./sonder codegen"
+    echo "    ./sonder codegen и закоммить результат"
     return 1
   fi
   echo "    совпадает с контрактами"

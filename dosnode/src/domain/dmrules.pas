@@ -22,15 +22,38 @@ uses
 
 {$I dmlimits.inc}
 
+type
+  { Исход проверки свободного текста.
+
+    Три разных отказа, а не один Boolean, потому что оболочке они
+    соответствуют разным кодам, и слить их значило бы сказать
+    пользователю «неверно» там, где на самом деле «слишком длинно». }
+  TTextVerdict = (tvOk, tvEmpty, tvTooLong, tvBadEncoding);
+
+{ Свободный текст: непустой, корректный UTF-8, не длиннее MaxChars СИМВОЛОВ.
+
+  Символов, а не байт. Предел приходит из веб-контракта, где maxLength
+  считается в кодовых точках: шестьдесят кириллических букв — это шестьдесят
+  символов и сто двадцать байт. Сравнение байтовой длины с таким пределом
+  означало бы, что клиент подсказал пользователю одно, а ядро решило по
+  другому — ровно то расхождение, от которого предостерегает limits.yaml.
+
+  Кодировка проверяется до пустоты и до длины: интерпретировать байты,
+  которые ещё не признаны корректными, неправильно. }
+function TextCheck(const S: TStr; MaxChars: Word): TTextVerdict;
+
 { Ник: строчные латинские буквы, цифры и подчёркивание, длина в границах
   контракта. Регистр не приводится: ник «Andrey» неверен, а не
   эквивалентен «andrey». Приведение регистра — работа оболочки при
-  проверке занятости, а не ядра. }
+  проверке занятости, а не ядра.
+
+  Длина здесь честно байтовая: контракт допускает только ASCII, и
+  проверка символов всё равно отвергнет любой байт со старшим битом. }
 function NickWellFormed(const Nick: TStr): Boolean;
 
-{ Отображаемое имя: непустое и не длиннее границы. Символы произвольные:
-  это человеческое имя, а не идентификатор. }
-function DisplayNameWellFormed(const Name: TStr): Boolean;
+{ Отображаемое имя: непустое, корректное и не длиннее границы. Символы
+  произвольные: это человеческое имя, а не идентификатор. }
+function DisplayNameCheck(const Name: TStr): TTextVerdict;
 
 { Ранг роли. Нужен, чтобы сравнивать роли, а не перечислять пары. }
 function RoleRank(R: TRole): Integer;
@@ -81,10 +104,33 @@ begin
   NickWellFormed := True;
 end;
 
-function DisplayNameWellFormed(const Name: TStr): Boolean;
+function TextCheck(const S: TStr; MaxChars: Word): TTextVerdict;
+var
+  N: Word;
 begin
-  DisplayNameWellFormed :=
-    (not StrIsBlank(Name)) and (Name.Len <= LIM_DISPLAY_NAME_MAX_LEN);
+  if not StrCharLen(S, N) then
+  begin
+    TextCheck := tvBadEncoding;
+    Exit;
+  end;
+  if StrIsBlank(S) then
+  begin
+    { Текст из одних пробельных символов пуст по смыслу: пост из десяти
+      пробелов — это пустой пост. }
+    TextCheck := tvEmpty;
+    Exit;
+  end;
+  if N > MaxChars then
+  begin
+    TextCheck := tvTooLong;
+    Exit;
+  end;
+  TextCheck := tvOk;
+end;
+
+function DisplayNameCheck(const Name: TStr): TTextVerdict;
+begin
+  DisplayNameCheck := TextCheck(Name, LIM_DISPLAY_NAME_MAX_LEN);
 end;
 
 function RoleRank(R: TRole): Integer;

@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'BAN_REASON_EMPTY'
   | 'BAN_REASON_TOO_LONG'
   | 'DISPLAY_NAME_INVALID'
+  | 'TEXT_ENCODING_INVALID'
   | 'SESSION_INVALID'
   | 'CREDENTIALS_INVALID'
   | 'ACTOR_BANNED'
@@ -65,6 +66,7 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   BAN_REASON_EMPTY: { category: 'VALIDATION', httpStatus: 400, retryable: false },
   BAN_REASON_TOO_LONG: { category: 'VALIDATION', httpStatus: 400, retryable: false },
   DISPLAY_NAME_INVALID: { category: 'VALIDATION', httpStatus: 400, retryable: false },
+  TEXT_ENCODING_INVALID: { category: 'VALIDATION', httpStatus: 400, retryable: false },
   SESSION_INVALID: { category: 'AUTH', httpStatus: 401, retryable: false },
   CREDENTIALS_INVALID: { category: 'AUTH', httpStatus: 401, retryable: false },
   ACTOR_BANNED: { category: 'PERMISSION', httpStatus: 403, retryable: false },

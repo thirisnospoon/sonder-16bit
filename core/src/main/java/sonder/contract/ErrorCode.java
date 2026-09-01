@@ -36,6 +36,8 @@ public enum ErrorCode {
     BAN_REASON_TOO_LONG(Category.VALIDATION, 400, false, true),
     /** Отображаемое имя пустое или длиннее допустимого */
     DISPLAY_NAME_INVALID(Category.VALIDATION, 400, false, true),
+    /** Свободный текст не является корректным UTF-8. Ядро считает длину в символах, а испорченную последовательность посчитать нельзя, поэтому отказ выносится раньше проверки длины. В норме недостижим: байты порождает Java, а линия защищена CRC-16. */
+    TEXT_ENCODING_INVALID(Category.VALIDATION, 400, false, true),
     /** Сессия не найдена, истекла или отозвана */
     SESSION_INVALID(Category.AUTH, 401, false, false),
     /** Неверная пара логин и пароль */

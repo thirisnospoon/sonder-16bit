@@ -38,7 +38,7 @@ const
   TapFile    = 'tstdomn.tap';
 {$ENDIF}
 
-  PlannedTests = 61;
+  PlannedTests = 64;
   Seed0 = 20260903;
 
 var
@@ -52,6 +52,15 @@ var
     переменные — самый простой способ обеспечить нужное время жизни. }
   SActor, STarget, SPost, SNick, SName, SBody, SReason: string;
   SProbe: string;   { для проб в тестах правил, чтобы не портить заготовки }
+
+  { Буфер под длинные строки. Паскалевская строка не длиннее 255 байт, а
+    тело поста по контракту — тысяча символов, то есть до четырёх тысяч
+    байт кириллицей.
+
+    Подделывать длину, не подкладывая байтов, больше нельзя: ядро их
+    читает, чтобы посчитать символы. Раньше два теста так и делали, и
+    это работало ровно до тех пор, пока длина сравнивалась байтовая. }
+  BigBuf: array[0..4095] of Char;
 
 {$PUSH}{$Q-}
 function NextRnd: LongInt;
@@ -70,6 +79,35 @@ end;
 function Code(const Dec: TDecision): string;
 begin
   Code := StrHead(Dec.errorCode);
+end;
+
+{ Строка из Count повторений последовательности Seq, уложенная в BigBuf.
+
+  Именно повторений, а не байт: для кириллицы Seq длиной два байта даёт
+  Count символов и вдвое больше байт. На этом различии и держится вся
+  проверка — предел контракта задан в символах. }
+function Repeated(const Seq: string; Count: Word): TStr;
+var
+  I, J, Pos: Word;
+  R: TStr;
+begin
+  Pos := 0;
+  for I := 1 to Count do
+    for J := 1 to Length(Seq) do
+    begin
+      if Pos >= SizeOf(BigBuf) then
+      begin
+        { Молча обрезать значило бы получить зелёный тест на строке не той
+          длины, какую он объявляет. Лучше упасть. }
+        TestDiag('BigBuf мал для этого случая');
+        Halt(2);
+      end;
+      BigBuf[Pos] := Seq[J];
+      Inc(Pos);
+    end;
+  R.Ptr := @BigBuf[0];
+  R.Len := Pos;
+  Repeated := R;
 end;
 
 function EventCount(const Dec: TDecision): Integer;
@@ -322,11 +360,36 @@ begin
 
   ArenaReset(Arena);
   BaseCreatePost(CP);
-  { Строка длиннее границы: сама TStr длину не ограничивает, поэтому
-    подделываем её напрямую — так же, как это сделал бы разбор XML. }
-  CP.command.body.Len := LIM_POST_BODY_MAX_LEN + 1;
+  CP.command.body := Repeated('a', LIM_POST_BODY_MAX_LEN + 1);
   R := DecideCreatePost(Arena, CP, D);
   CheckRejected('слишком длинный пост отвергается', D, 'POST_BODY_TOO_LONG');
+
+  { Предел контракта задан в СИМВОЛАХ, а не в байтах. Кириллица занимает
+    по два байта, и тысяча таких символов — законный пост длиной две
+    тысячи байт. Пока ядро сравнивало байты, оно отвергало его, а веб по
+    тому же контракту принимал: клиент подсказывал одно, ядро решало по
+    другому. Ровно то расхождение, от которого предостерегает limits.yaml. }
+  ArenaReset(Arena);
+  BaseCreatePost(CP);
+  CP.command.body := Repeated('я', LIM_POST_BODY_MAX_LEN);
+  R := DecideCreatePost(Arena, CP, D);
+  CheckAccepted('тысяча кириллических символов — законный пост', D);
+
+  ArenaReset(Arena);
+  BaseCreatePost(CP);
+  CP.command.body := Repeated('я', LIM_POST_BODY_MAX_LEN + 1);
+  R := DecideCreatePost(Arena, CP, D);
+  CheckRejected('символом больше предела — отказ, и именно по длине',
+                D, 'POST_BODY_TOO_LONG');
+
+  { Испорченная последовательность не должна выдавать себя за короткий
+    текст: посчитать её нельзя, и отказ выносится до проверки длины. }
+  ArenaReset(Arena);
+  BaseCreatePost(CP);
+  CP.command.body := Repeated(#$D0, 4);   { ведущий байт без продолжения }
+  R := DecideCreatePost(Arena, CP, D);
+  CheckRejected('испорченный UTF-8 в теле поста отвергается',
+                D, 'TEXT_ENCODING_INVALID');
 
   ArenaReset(Arena);
   BaseCreatePost(CP);
@@ -476,7 +539,7 @@ begin
 
   ArenaReset(Arena);
   BaseBan(BU);
-  BU.command.reason.Len := LIM_BAN_REASON_MAX_LEN + 1;
+  BU.command.reason := Repeated('a', LIM_BAN_REASON_MAX_LEN + 1);
   R := DecideBanUser(Arena, BU, D);
   CheckRejected('слишком длинная причина отвергается', D,
                 'BAN_REASON_TOO_LONG');

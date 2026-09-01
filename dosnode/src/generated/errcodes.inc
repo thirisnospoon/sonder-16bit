@@ -22,6 +22,7 @@ const
   ERR_BAN_REASON_EMPTY           = 'BAN_REASON_EMPTY';
   ERR_BAN_REASON_TOO_LONG        = 'BAN_REASON_TOO_LONG';
   ERR_DISPLAY_NAME_INVALID       = 'DISPLAY_NAME_INVALID';
+  ERR_TEXT_ENCODING_INVALID      = 'TEXT_ENCODING_INVALID';
 
   { --- AUTH --- }
   ERR_SESSION_INVALID            = 'SESSION_INVALID';
@@ -57,7 +58,7 @@ const
   ERR_DECIDER_PANIC              = 'DECIDER_PANIC';
 
   { Число кодов: полезно для проверки полноты таблиц. }
-  ERR_CODE_COUNT = 27;
+  ERR_CODE_COUNT = 28;
 
   { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
     из TcResult: добавление длинного кода не должно молча

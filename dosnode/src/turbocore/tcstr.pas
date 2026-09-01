@@ -60,6 +60,24 @@ function StrEqPas(const A: TStr; const B: string): Boolean;
   всё, что длиннее, обрезается молча, и полагаться на это нельзя. }
 function StrHead(const S: TStr): string;
 
+{ Длина в символах Unicode, а не в байтах.
+
+  Нужна потому, что maxLength в веб-контракте считается в символах: шесть
+  десятков кириллических букв — это шестьдесят символов и сто двадцать байт.
+  Сравнение байтовой длины с таким пределом означало бы, что клиент подсказал
+  пользователю одно, а ядро решило по другому.
+
+  Проверка и счёт неразделимы: посчитать испорченную последовательность
+  нельзя, а два прохода по одним и тем же байтам на 4.77 МГц — расточительство.
+  Отсюда Boolean в результате и счёт через var, как у AlignUp в TcArena.
+  False означает, что N не определено.
+
+  Отвергаются и избыточные формы, и суррогаты (RFC 3629). Избыточная запись
+  даёт две записи одной кодовой точке, а суррогатов в UTF-8 не существует
+  вовсе — принимать их значило бы пропускать в домен строки, которые
+  Java-сторона считает невозможными. }
+function StrCharLen(const S: TStr; var N: Word): Boolean;
+
 implementation
 
 function StrNil: TStr;
@@ -189,6 +207,88 @@ begin
   for I := 0 to N - 1 do
     R := R + StrCharAt(S, I);
   StrHead := R;
+end;
+
+function StrCharLen(const S: TStr; var N: Word): Boolean;
+var
+  I, K, Cnt: Word;
+  Need, J: Byte;
+  B, B2: Byte;
+begin
+  StrCharLen := False;
+  N := 0;
+
+  if S.Len = 0 then
+  begin
+    { Пустая строка корректна и состоит из нуля символов. Ptr при этом
+      может быть каким угодно: читать по нему всё равно нечего. }
+    StrCharLen := True;
+    Exit;
+  end;
+  if S.Ptr = nil then
+    Exit;
+
+  I := 0;
+  Cnt := 0;
+  while I < S.Len do
+  begin
+    B := Byte(S.Ptr[I]);
+
+    if B < $80 then
+      Need := 0
+    else if B < $C2 then
+      { $80..$BF — продолжающий байт на месте ведущего.
+        $C0 и $C1 — только избыточные записи ASCII. }
+      Exit
+    else if B < $E0 then
+      Need := 1
+    else if B < $F0 then
+      Need := 2
+    else if B < $F5 then
+      Need := 3
+    else
+      { $F5..$FF вывели бы за U+10FFFF. }
+      Exit;
+
+    { Сравнение записано так, а не как I + Need >= S.Len, потому что сумма
+      переполнила бы Word при длине под предел. Ровно на таком переполнении
+      уже сломался AlignUp, и 16-битный таргет проглотил это молча. }
+    if Need > S.Len - 1 - I then
+      Exit;
+
+    if Need > 0 then
+    begin
+      { Смещение считается отдельным курсором типа Word, а не выражением
+        I + J: на шестнадцати битах сумма Word и Byte считалась бы в знаковом
+        типе и завернулась бы за 32767. Строка по контракту столько не
+        наберёт, но скрытого предела в примитиве фреймворка быть не должно. }
+      K := I;
+      Inc(K);
+      B2 := Byte(S.Ptr[K]);
+      if (B2 < $80) or (B2 > $BF) then
+        Exit;
+
+      { Избыточные формы и суррогаты видны по второму байту. }
+      if (B = $E0) and (B2 < $A0) then Exit;   { трёхбайтовая запись короткой }
+      if (B = $ED) and (B2 > $9F) then Exit;   { D800..DFFF — суррогаты }
+      if (B = $F0) and (B2 < $90) then Exit;   { четырёхбайтовая запись короткой }
+      if (B = $F4) and (B2 > $8F) then Exit;   { за U+10FFFF }
+
+      for J := 2 to Need do
+      begin
+        Inc(K);
+        B2 := Byte(S.Ptr[K]);
+        if (B2 < $80) or (B2 > $BF) then
+          Exit;
+      end;
+    end;
+
+    Inc(I, Need + 1);
+    Inc(Cnt);
+  end;
+
+  N := Cnt;
+  StrCharLen := True;
 end;
 
 end.

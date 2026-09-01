@@ -23,6 +23,10 @@
     5. состояние объекта  — конфликты и идемпотентность;
     6. ограничения частоты — последними, они самые дорогие по смыслу.
 
+  Внутри четвёртого шага кодировка проверяется прежде пустоты и длины:
+  интерпретировать байты, ещё не признанные корректным UTF-8, неправильно,
+  а посчитать в них символы нельзя вовсе (ADR-0014).
+
   Порядок влияет на то, какой код увидит пользователь, когда нарушены
   сразу два правила. Менять его — изменение поведения, а не рефакторинг.
   =================================================================== }
@@ -259,10 +263,19 @@ begin
     Exit;
   end;
 
-  if not DisplayNameWellFormed(Req.command.displayName) then
-  begin
-    Reject(D, ERR_DISPLAY_NAME_INVALID);
-    Exit;
+  case DisplayNameCheck(Req.command.displayName) of
+    tvBadEncoding:
+      begin
+        Reject(D, ERR_TEXT_ENCODING_INVALID);
+        Exit;
+      end;
+    tvEmpty, tvTooLong:
+      begin
+        { Контракт объединяет пустое и слишком длинное имя одним кодом:
+          и то и другое для пользователя означает «поправьте имя». }
+        Reject(D, ERR_DISPLAY_NAME_INVALID);
+        Exit;
+      end;
   end;
 
   if Req.nick.taken then
@@ -316,16 +329,22 @@ begin
     Exit;
   end;
 
-  if StrIsBlank(Req.command.body) then
-  begin
-    Reject(D, ERR_POST_BODY_EMPTY);
-    Exit;
-  end;
-
-  if Req.command.body.Len > LIM_POST_BODY_MAX_LEN then
-  begin
-    Reject(D, ERR_POST_BODY_TOO_LONG);
-    Exit;
+  case TextCheck(Req.command.body, LIM_POST_BODY_MAX_LEN) of
+    tvBadEncoding:
+      begin
+        Reject(D, ERR_TEXT_ENCODING_INVALID);
+        Exit;
+      end;
+    tvEmpty:
+      begin
+        Reject(D, ERR_POST_BODY_EMPTY);
+        Exit;
+      end;
+    tvTooLong:
+      begin
+        Reject(D, ERR_POST_BODY_TOO_LONG);
+        Exit;
+      end;
   end;
 
   if Req.actor.postsLastHour >= LIM_POSTS_PER_HOUR then
@@ -500,16 +519,22 @@ begin
     Exit;
   end;
 
-  if StrIsBlank(Req.command.reason) then
-  begin
-    Reject(D, ERR_BAN_REASON_EMPTY);
-    Exit;
-  end;
-
-  if Req.command.reason.Len > LIM_BAN_REASON_MAX_LEN then
-  begin
-    Reject(D, ERR_BAN_REASON_TOO_LONG);
-    Exit;
+  case TextCheck(Req.command.reason, LIM_BAN_REASON_MAX_LEN) of
+    tvBadEncoding:
+      begin
+        Reject(D, ERR_TEXT_ENCODING_INVALID);
+        Exit;
+      end;
+    tvEmpty:
+      begin
+        Reject(D, ERR_BAN_REASON_EMPTY);
+        Exit;
+      end;
+    tvTooLong:
+      begin
+        Reject(D, ERR_BAN_REASON_TOO_LONG);
+        Exit;
+      end;
   end;
 
   if IsBanned(Req.target.status) then
