@@ -84,6 +84,15 @@ def validate_errors() -> dict:
             f"errors.yaml: код {code} должен быть в ВЕРХНЕМ_РЕГИСТРЕ",
             bool(re.fullmatch(r"[A-Z][A-Z0-9_]*", code)),
         )
+        # Повторяемость кода необязательна, но если объявлена — булева.
+        # Строка «true» здесь тихо стала бы истиной в одном языке и
+        # ложью в другом.
+        if "retryable" in entry:
+            check(
+                f"errors.yaml: retryable у кода {code} должен быть true или "
+                f"false, а не {entry['retryable']!r}",
+                isinstance(entry["retryable"], bool),
+            )
 
     for cat, spec in doc.get("categories", {}).items():
         check(f"errors.yaml: у категории {cat} нет http-статуса", "http" in spec)

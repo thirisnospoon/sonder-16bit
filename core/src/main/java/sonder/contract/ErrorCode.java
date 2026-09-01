@@ -63,7 +63,7 @@ public enum ErrorCode {
     /** Пользователь уже заблокирован */
     ALREADY_BANNED(Category.CONFLICT, 409, false, true),
     /** Состояние изменилось между загрузкой и сохранением, команду надо переиграть */
-    STATE_VERSION_CONFLICT(Category.CONFLICT, 409, false, false),
+    STATE_VERSION_CONFLICT(Category.CONFLICT, 409, true, false),
     /** Превышено число постов за окно */
     POST_RATE_EXCEEDED(Category.RATE_LIMIT, 429, true, true),
     /** Превышено число комментариев за окно */

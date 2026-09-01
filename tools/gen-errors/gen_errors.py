@@ -132,7 +132,8 @@ def java(doc: dict) -> str:
     for i, entry in enumerate(doc["codes"]):
         cat = entry["category"]
         http = cats[cat]["http"]
-        retryable = str(cats[cat]["retryable"]).lower()
+        # Повторяемость: своё поле кода перекрывает умолчание категории.
+        retryable = str(entry.get("retryable", cats[cat]["retryable"])).lower()
         core = str(entry["decided_by"].startswith("core")).lower()
         desc = " ".join(str(entry["description"]).split())
         sep = "," if i < last else ";"
