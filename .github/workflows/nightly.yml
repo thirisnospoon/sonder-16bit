@@ -70,3 +70,43 @@ jobs:
             spikes/**/out/**/*.log
             spikes/**/out/**/result.json
           retention-days: 14
+
+  # Гейт Ф5 требует суток фаззинга без падений. Суточный прогон в GitHub
+  # Actions не помещается — предел задания шесть часов, — поэтому ночью
+  # гоняется отсечка, а полные сутки набираются вручную перед закрытием
+  # фазы. Обманывать себя тут нечем: несколько часов каждую ночь дают
+  # больше случаев, чем одни сутки один раз.
+  soak:
+    name: Фаззинг XML и кадров
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Образ тулчейна
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/toolchain/Dockerfile
+          tags: sonder/dos-toolchain:3.2.2
+          load: true
+          cache-from: type=gha,scope=dos-toolchain
+          cache-to: type=gha,scope=dos-toolchain,mode=max
+
+      # Нативно — объём: около пятидесяти тысяч случаев в секунду.
+      - name: Нативный таргет, три часа
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 \
+            bash dosnode/fuzz/soak.sh --hours 3 --target native --rounds 200000
+
+      # Под DOSBox — тот самый код, который поедет в бой. На порядки
+      # медленнее, поэтому короче: смысл в подтверждении, что 16-битная
+      # сборка ведёт себя так же, а не в числе случаев.
+      - name: Таргет i8086-msdos, двадцать минут
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 \
+            bash dosnode/fuzz/soak.sh --minutes 20 --target msdos --rounds 2000

@@ -4,6 +4,7 @@
 #   ./sonder bootstrap   собрать образы тулчейна
 #   ./sonder verify      прогнать все проверки, как в CI
 #   ./sonder spikes      прогнать спайки фазы 0
+#   ./sonder soak        долгий фаззинг XML и кадров
 #   ./sonder help        список целей
 #
 # Из зависимостей нужен только Docker: весь тулчейн живёт в образах, на хосте
@@ -194,6 +195,21 @@ cmd_spikes() {
   return "$rc"
 }
 
+# ------------------------------------------------------------------- фаззинг
+
+# Долгий прогон фаззеров XML и кадрирования. В verify не входит: гейт
+# требует суток, а проверка перед коммитом обязана укладываться в минуты.
+# Аргументы прокидываются в dosnode/fuzz/soak.sh как есть.
+cmd_soak() {
+  ensure_dos
+  step "фаззинг XML и кадров"
+  if [ $# -eq 0 ]; then
+    run_dos bash dosnode/fuzz/soak.sh --minutes 5 --target native
+  else
+    run_dos bash dosnode/fuzz/soak.sh "$@"
+  fi
+}
+
 cmd_clean() {
   rm -rf spikes/*/out
   echo "сборочные артефакты удалены"
@@ -216,6 +232,7 @@ Sonder — цели
   test-native          только нативный таргет, доли секунды
 
   spikes               прогнать спайки фазы 0
+  soak [args]          долгий фаззинг XML и кадров, по умолчанию 5 минут
   clean                удалить сборочные артефакты
 
 Состояние: фаза 0 пройдена, фаза 1 в работе.
@@ -237,6 +254,7 @@ case "${1:-help}" in
   test)               need_docker; cmd_test ;;
   test-native)        need_docker; cmd_test_native ;;
   spikes)             cmd_spikes ;;
+  soak)               shift; need_docker; cmd_soak "$@" ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
   *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;
