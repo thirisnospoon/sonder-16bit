@@ -104,6 +104,30 @@ CASES: list[Case] = [
         "  - code: SOMETHING_ELSE",
         "обязан решаться ядром",
     ),
+    # Схема БД — четвёртый потребитель тех же чисел. Разойтись она может
+    # так же молча, а последствие хуже: ядро примет строку, которую база
+    # не сохранит, и отказ придёт после «готово».
+    (
+        "длина колонки разошлась с границей контракта",
+        "core/src/main/resources/db/migration/V1__baseline.sql",
+        "  display_name   VARCHAR(60)",
+        "  display_name   VARCHAR(50)",
+        "расходится с display_name_max_len",
+    ),
+    (
+        "в CHECK потерялось значение перечисления",
+        "core/src/main/resources/db/migration/V1__baseline.sql",
+        "CHECK (role IN ('USER', 'MODERATOR', 'ADMIN'))",
+        "CHECK (role IN ('USER', 'ADMIN'))",
+        "а контракт Role",
+    ),
+    (
+        "у колонки перечисления нет CHECK вовсе",
+        "core/src/main/resources/db/migration/V1__baseline.sql",
+        "  CONSTRAINT ck_users_status CHECK (status IN ('ACTIVE', 'BANNED', 'DELETED'))",
+        "  CONSTRAINT ck_users_status CHECK (LENGTH(status) > 0)",
+        "нет CHECK со списком значений",
+    ),
 ]
 
 
@@ -132,6 +156,13 @@ def main() -> int:
             work = Path(tmp) / "repo"
             shutil.copytree(ROOT / "contracts", work / "contracts")
             shutil.copytree(ROOT / "tools", work / "tools")
+            # Миграции валидатор тоже сверяет с контрактом, поэтому их
+            # копия нужна так же, как копия contracts. Каталог может ещё
+            # не существовать — на ранних фазах его не было.
+            migrations = ROOT / "core/src/main/resources/db/migration"
+            if migrations.exists():
+                shutil.copytree(migrations,
+                                work / "core/src/main/resources/db/migration")
 
             target = work / rel
             text = target.read_bytes().decode("utf-8")

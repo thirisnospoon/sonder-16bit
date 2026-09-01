@@ -29,3 +29,4 @@ dist/
 
 # сборочные каталоги dosnode
 /dosnode/build/out/
+target/

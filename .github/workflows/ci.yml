@@ -98,6 +98,9 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/work" -w /work             sonder/dos-toolchain:3.2.2             bash dosnode/build/test.sh both
 
+      - name: Оболочка на Java собирается и проходит тесты
+        run: bash ops/ci/mvn.sh -B verify
+
       - name: Артефакты при провале
         if: failure()
         uses: actions/upload-artifact@v4

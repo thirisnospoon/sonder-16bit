@@ -10,7 +10,9 @@
   * каждая операция WSDL объявляет и команду, и состояние, и решение;
   * ни одно текстовое поле IDL не объявлено как string — CORBA не примет
     кириллицу и упадёт в рантайме (docs/PHASE0-FINDINGS.md, F-09);
-  * коды, которые обязано возвращать ядро, не назначены оболочке и наоборот.
+  * коды, которые обязано возвращать ядро, не назначены оболочке и наоборот;
+  * длины VARCHAR и списки CHECK в миграциях совпадают с границами и
+    перечислениями контракта — иначе ядро примет то, чего база не сохранит.
 
 Выход: 0 — контракты согласованы, 1 — нет.
 """
@@ -319,6 +321,176 @@ def validate_limits() -> None:
 
 
 # ----------------------------------------------------------------------- main
+def _strip_block_comments(text: str) -> str:
+    """Убрать /* ... */, сохранив нумерацию строк.
+
+    Нужно потому, что в блочном комментарии шапки миграции лежит ПРИМЕР
+    аннотации. Первая редакция проверки его и нашла, пожаловавшись на
+    перечисление с именем «Имя». Замена на пробелы, а не вырезание: номера
+    строк в сообщениях должны оставаться настоящими.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in text[i:j]))
+            i = j
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _tables(text: str) -> list[tuple[str, int, int, str]]:
+    """Определения таблиц: имя, первая строка, последняя, текст.
+
+    Область поиска CHECK — таблица, а не файл. Имена колонок в разных
+    таблицах совпадают: `status` есть и у пользователя, и у поста, а
+    перечисления у них разные. Поиск по всему файлу нашёл бы первое и
+    сравнил не с тем.
+    """
+    lines = text.splitlines()
+    result = []
+    start = None
+    name = ""
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*CREATE\s+TABLE\s+(\w+)", line, re.I)
+        if m:
+            start = i
+            name = m.group(1)
+            continue
+        if start is not None and re.match(r"\s*\)\s*;", line):
+            result.append((name, start, i, "\n".join(lines[start:i + 1])))
+            start = None
+    return result
+
+
+def validate_migrations() -> None:
+    """Схема БД против контракта.
+
+    Миграции — четвёртый потребитель тех же чисел, что limits.yaml отдаёт
+    в Pascal, TypeScript и OpenAPI. Разойтись они могут ровно так же
+    молча, а последствие хуже: ядро примет строку, которую база не
+    сохранит, и отказ придёт после того, как пользователю сказали «готово».
+
+    Сверяется по аннотациям в самом SQL:
+
+        limit: имя_границы    длина VARCHAR на следующей строке
+        enum: ИмяТипа         список в CHECK этой же таблицы
+
+    Аннотация, а не угадывание по имени колонки: имя в базе и имя границы
+    в контракте совпадать не обязаны, и додумывать связь между ними —
+    верный способ получить проверку, которая молчит.
+    """
+    mig_dir = ROOT / "core" / "src" / "main" / "resources" / "db" / "migration"
+    if not mig_dir.exists():
+        return
+
+    limits_path = CONTRACTS / "domain" / "limits.yaml"
+    limits = {}
+    if limits_path.exists():
+        doc = yaml.safe_load(limits_path.read_text(encoding="utf-8")) or {}
+        limits = {k: v.get("value") for k, v in (doc.get("limits") or {}).items()}
+
+    enums: dict[str, set[str]] = {}
+    for wsdl_path in sorted((CONTRACTS / "soap").glob("*.wsdl")):
+        root = ET.parse(wsdl_path).getroot()
+        for st in root.iter(f"{{{XS}}}simpleType"):
+            name = st.get("name")
+            restriction = st.find(f"{{{XS}}}restriction")
+            if not name or restriction is None:
+                continue
+            values = {e.get("value") for e in restriction.findall(f"{{{XS}}}enumeration")}
+            if values:
+                enums[name] = values
+
+    files = sorted(mig_dir.glob("V*.sql"))
+    check("нет ни одной миграции в core/src/main/resources/db/migration",
+          bool(files))
+
+    for path in files:
+        rel = path.relative_to(ROOT)
+        raw = path.read_text(encoding="utf-8")
+        text = _strip_block_comments(raw)
+        lines = text.splitlines()
+        tables = _tables(text)
+
+        def table_of(line_no: int) -> tuple[str, str]:
+            for name, a, b, body in tables:
+                if a <= line_no <= b:
+                    return name, body
+            return "", ""
+
+        for i, line in enumerate(lines):
+            m = re.search(r"--\s*limit:\s*([a-z0-9_]+)", line)
+            if m:
+                name = m.group(1)
+                check(
+                    f"{rel}:{i+1}: граница {name} не объявлена в limits.yaml",
+                    name in limits,
+                )
+                nxt = lines[i + 1] if i + 1 < len(lines) else ""
+                sizes = re.findall(r"VARCHAR\s*\(\s*(\d+)\s*\)", nxt, re.I)
+                check(
+                    f"{rel}:{i+2}: за аннотацией limit: {name} нет VARCHAR(n)",
+                    bool(sizes),
+                )
+                if sizes and name in limits:
+                    check(
+                        f"{rel}:{i+2}: VARCHAR({sizes[0]}) расходится с "
+                        f"{name} = {limits[name]} из limits.yaml — ядро и база "
+                        f"разрешат разное",
+                        int(sizes[0]) == int(limits[name]),
+                    )
+
+            m = re.search(r"--\s*enum:\s*(\w+)", line)
+            if m:
+                name = m.group(1)
+                check(
+                    f"{rel}:{i+1}: перечисление {name} не объявлено в WSDL",
+                    name in enums,
+                )
+                if name not in enums:
+                    continue
+
+                nxt = lines[i + 1] if i + 1 < len(lines) else ""
+                mc = re.match(r"\s*(\w+)\s+VARCHAR", nxt, re.I)
+                check(
+                    f"{rel}:{i+2}: за аннотацией enum: {name} нет колонки VARCHAR",
+                    bool(mc),
+                )
+                if not mc:
+                    continue
+                col = mc.group(1)
+
+                tname, body = table_of(i)
+                check(f"{rel}:{i+1}: аннотация enum: {name} вне определения таблицы",
+                      bool(body))
+                if not body:
+                    continue
+
+                mck = re.search(
+                    r"CHECK\s*\(\s*" + re.escape(col) + r"\s+IN\s*\(([^)]*)\)",
+                    body, re.I,
+                )
+                check(
+                    f"{rel}: у {tname}.{col} нет CHECK со списком значений — "
+                    f"без него в колонку ляжет что угодно",
+                    bool(mck),
+                )
+                if not mck:
+                    continue
+                got = {v.strip().strip("'") for v in mck.group(1).split(",")}
+                check(
+                    f"{rel}: CHECK у {tname}.{col} перечисляет {sorted(got)}, "
+                    f"а контракт {name} — {sorted(enums[name])}",
+                    got == enums[name],
+                )
+
+
 def main() -> int:
     if not CONTRACTS.exists():
         print(f"нет каталога {CONTRACTS}", file=sys.stderr)
@@ -329,6 +501,7 @@ def main() -> int:
     validate_idl()
     validate_openapi()
     validate_limits()
+    validate_migrations()
 
     print(f"проверок выполнено: {checks}")
     if problems:
