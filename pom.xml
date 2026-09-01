@@ -48,7 +48,6 @@
     <flyway.version>8.5.13</flyway.version>
     <cxf.version>3.5.8</cxf.version>
     <archunit.version>0.23.1</archunit.version>
-    <testcontainers.version>1.17.6</testcontainers.version>
   </properties>
 
   <dependencyManagement>
@@ -57,13 +56,6 @@
         <groupId>org.firebirdsql.jdbc</groupId>
         <artifactId>jaybird</artifactId>
         <version>${jaybird.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.testcontainers</groupId>
-        <artifactId>testcontainers-bom</artifactId>
-        <version>${testcontainers.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
       </dependency>
       <dependency>
         <groupId>com.tngtech.archunit</groupId>

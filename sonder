@@ -214,6 +214,15 @@ cmd_java() {
   fi
 }
 
+# Интеграционные тесты оболочки: поднимают настоящий Firebird через
+# Testcontainers. Отдельно от cmd_java, потому что требуют Docker внутри
+# контейнера сборки, а обычная сборка обязана оставаться герметичной.
+cmd_java_it() {
+  need_docker
+  step "интеграционные тесты оболочки"
+  bash ops/ci/run-it.sh
+}
+
 # ------------------------------------------------------------------- фаззинг
 
 # Долгий прогон фаззеров XML и кадрирования. В verify не входит: гейт
@@ -253,6 +262,7 @@ Sonder — цели
   spikes               прогнать спайки фазы 0
   soak [args]          долгий фаззинг XML и кадров, по умолчанию 5 минут
   java [цели]          сборка и тесты оболочки, по умолчанию verify
+  java-it              интеграционные тесты оболочки против Firebird
   clean                удалить сборочные артефакты
 
 Состояние: фаза 0 пройдена, фаза 1 в работе.
@@ -276,6 +286,7 @@ case "${1:-help}" in
   spikes)             cmd_spikes ;;
   soak)               shift; need_docker; cmd_soak "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
+  java-it)            need_docker; cmd_java_it ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
   *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;

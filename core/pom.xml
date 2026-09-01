@@ -45,6 +45,21 @@
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
     </dependency>
+    <!--
+      Поддержка Firebird лежит ОТДЕЛЬНЫМ артефактом, и без него Flyway
+      отвечает «No database found to handle jdbc:firebirdsql:...» — как
+      будто дело в URL или драйвере.
+
+      С версии 8.2 Flyway вынес базы из flyway-core в отдельные модули;
+      в самом core остались только те, что были там исторически. Проверено
+      прямо: в flyway-core 8.5.13 и 9.22.3 нет ни одного класса с
+      «firebird», как нет и mysql с sqlserver.
+    -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-firebird</artifactId>
+      <version>${flyway.version}</version>
+    </dependency>
 
     <!-- SOAP-клиент к NODE-7. Contract-first: стабы порождаются из того
          же WSDL, из которого wsdl2pas порождает серверную сторону. -->
@@ -69,15 +84,40 @@
       <artifactId>archunit-junit5</artifactId>
       <scope>test</scope>
     </dependency>
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>testcontainers</artifactId>
-      <scope>test</scope>
-    </dependency>
   </dependencies>
+
+  <profiles>
+    <!--
+      Интеграционные тесты отдельным профилем, а не в каждой сборке.
+
+      Им нужен Docker: они поднимают настоящий Firebird. Обычная сборка
+      герметична и обязана оставаться такой — иначе она перестанет
+      запускаться там, где Docker недоступен, и это выяснится не сразу.
+
+      Запуск: ./sonder java-it
+    -->
+    <profile>
+      <id>it</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <useFile>false</useFile>
+              <trimStackTrace>false</trimStackTrace>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

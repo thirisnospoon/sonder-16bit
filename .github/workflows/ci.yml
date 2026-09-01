@@ -101,6 +101,12 @@ jobs:
       - name: Оболочка на Java собирается и проходит тесты
         run: bash ops/ci/mvn.sh -B verify
 
+      # Схема проверяется против настоящего Firebird, а не против H2.
+      # Разница не косметическая: длина VARCHAR в Firebird считается в
+      # символах, а вся проверка границы именно об этом.
+      - name: Схема против настоящего Firebird
+        run: bash ops/ci/run-it.sh
+
       - name: Артефакты при провале
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Уровни логов в тестах.
+
+  ArchUnit на уровне DEBUG печатает строку на каждый обработанный класс, то
+  есть тысячи строк на прогон. В таком выводе настоящая ошибка не видна, а
+  лог CI перестают читать целиком — и это хуже, чем недостаток подробностей.
+-->
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.tngtech.archunit" level="WARN"/>
+  <!-- Testcontainers на INFO сообщает, что поднял и на каком порту: это
+       ровно то, что нужно, когда база не поднялась. -->
+  <logger name="org.testcontainers" level="INFO"/>
+  <logger name="com.github.dockerjava" level="WARN"/>
+  <logger name="org.flywaydb" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>
