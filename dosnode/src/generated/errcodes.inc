@@ -56,9 +56,10 @@ const
   { --- INTERNAL --- }
   ERR_INSUFFICIENT_CONTEXT       = 'INSUFFICIENT_CONTEXT';
   ERR_DECIDER_PANIC              = 'DECIDER_PANIC';
+  ERR_MALFORMED_ENVELOPE         = 'MALFORMED_ENVELOPE';
 
   { Число кодов: полезно для проверки полноты таблиц. }
-  ERR_CODE_COUNT = 28;
+  ERR_CODE_COUNT = 29;
 
   { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
     из TcResult: добавление длинного кода не должно молча
