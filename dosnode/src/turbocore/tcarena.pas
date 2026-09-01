@@ -59,6 +59,10 @@ type
     Live:     Boolean;
   end;
 
+  { Указатель на арену. Нужен тем, кто хранит арену в своей записи, а не
+    получает параметром: разборщик конверта живёт дольше одного вызова. }
+  PArena = ^TArena;
+
 { Создать арену заданного размера. Память берётся у кучи один раз. }
 function ArenaCreate(var A: TArena; Capacity: Word;
                      const Name: string): TResult;
@@ -83,6 +87,51 @@ function ArenaDup(var A: TArena; Src: Pointer; Bytes: Word;
   исходник — в отличие от результата StrView, который живёт ровно столько,
   сколько живёт то, на что он смотрит. }
 function ArenaDupStr(var A: TArena; const Src: TStr; var Dst: TStr): TResult;
+
+type
+  { Наращиваемая строка в арене.
+
+    Потоковый разбор выдаёт текст кусками, а поле по контракту бывает в
+    четыре килобайта: фиксированного буфера под него нет ни в разборщике,
+    ни в сегменте данных. Строка растёт прямо в арене, байт к байту, БЕЗ
+    ВЫРАВНИВАНИЯ между кусками — иначе между ними легла бы набивка и
+    строка перестала быть непрерывной.
+
+    Отсюда единственное правило: пока строка растёт, из этой арены больше
+    никто не выделяет. Чужое выделение вклинилось бы в середину, и
+    получилась бы строка, содержащая чужие данные, — то есть
+    правдоподобный неверный результат.
+
+    Правило не на словах: BuildAppend сверяет, что арена стоит ровно там,
+    где её оставили, и отказывает, если нет. Смещение, а не указатель,
+    именно ради этой сверки. }
+  TStrBuilder = record
+    Start: Word;     { смещение начала строки в арене }
+    Len:   Word;
+    Live:  Boolean;
+  end;
+
+{ Начать строку в текущей позиции арены. }
+function BuildBegin(var A: TArena; var B: TStrBuilder): TResult;
+
+{ Дописать кусок. Отказ означает либо что арена кончилась, либо что из
+  неё выделяли, пока строка росла. }
+function BuildAppend(var A: TArena; var B: TStrBuilder;
+                     Src: Pointer; Bytes: Word): TResult;
+
+{ Закончить строку. Арена возвращается к выровненной позиции, чтобы
+  следующее выделение снова было выровнено. }
+function BuildFinish(var A: TArena; var B: TStrBuilder;
+                     var S: TStr): TResult;
+
+{ Бросить строку и вернуть арене её байты.
+
+  Нужно потому, что потоковый разбор узнаёт о смысле элемента задним
+  числом: пробелы между вложенными элементами приходят раньше, чем
+  становится ясно, что элемент был не полем, а группой. Откат возможен
+  ровно потому, что арена бампающая и после начала строки из неё никто
+  не выделял — то же условие, что и у BuildAppend. }
+procedure BuildCancel(var A: TArena; var B: TStrBuilder);
 
 { Сбросить арену целиком. Указатели, выданные ранее, становятся
   недействительными немедленно. }
@@ -288,6 +337,132 @@ begin
     ArenaAvail := 0
   else
     ArenaAvail := A.Capacity - A.Used;
+end;
+
+{ ------------------------------------------------------------------
+  Наращиваемая строка
+  ------------------------------------------------------------------ }
+
+procedure BuildCancel(var A: TArena; var B: TStrBuilder);
+begin
+  if not B.Live then
+    Exit;
+  { Откатываем только если из арены действительно никто не выделял:
+    иначе мы вернули бы чужую память. }
+  if A.Live and (A.Used - B.Start = B.Len) then
+    A.Used := B.Start;
+  B.Live := False;
+  B.Len := 0;
+end;
+
+function BuildBegin(var A: TArena; var B: TStrBuilder): TResult;
+begin
+  B.Start := 0;
+  B.Len := 0;
+  B.Live := False;
+
+  if not A.Live then
+  begin
+    BuildBegin := Err('DECIDER_PANIC');
+    Exit;
+  end;
+
+  B.Start := A.Used;
+  B.Live := True;
+  BuildBegin := Ok;
+end;
+
+function BuildAppend(var A: TArena; var B: TStrBuilder;
+                     Src: Pointer; Bytes: Word): TResult;
+var
+  Dst: PByte;
+begin
+  if (not A.Live) or (not B.Live) then
+  begin
+    BuildAppend := Err('DECIDER_PANIC');
+    Exit;
+  end;
+
+  { Сверка написана как разность, а не как Start + Len: сумма могла бы
+    переполнить Word на арене под предел, и проверка прошла бы там, где
+    должна отказать. Used >= Start всегда, поэтому разность безопасна. }
+  if A.Used - B.Start <> B.Len then
+  begin
+    { Из арены выделяли, пока строка росла. Продолжать нельзя: строка
+      уже содержит чужие байты в середине. }
+    B.Live := False;
+    BuildAppend := Err('DECIDER_PANIC');
+    Exit;
+  end;
+
+  if Bytes = 0 then
+  begin
+    { Пустой кусок законен: разборщик может выдать поле без текста. }
+    BuildAppend := Ok;
+    Exit;
+  end;
+
+  if Bytes > A.Capacity - A.Used then
+  begin
+    BuildAppend := Err('INSUFFICIENT_CONTEXT');
+    Exit;
+  end;
+
+  Dst := PByte(A.Base);
+  Inc(Dst, A.Used);
+  Move(Src^, Dst^, Bytes);
+
+  { Без выравнивания: байты обязаны лечь вплотную к предыдущему куску. }
+  Inc(A.Used, Bytes);
+  Inc(B.Len, Bytes);
+  if A.Used > A.HighMark then
+    A.HighMark := A.Used;
+
+  BuildAppend := Ok;
+end;
+
+function BuildFinish(var A: TArena; var B: TStrBuilder;
+                     var S: TStr): TResult;
+var
+  Base: PByte;
+  Aligned: Word;
+begin
+  S := StrNil;
+
+  if (not A.Live) or (not B.Live) then
+  begin
+    BuildFinish := Err('DECIDER_PANIC');
+    Exit;
+  end;
+  if A.Used - B.Start <> B.Len then
+  begin
+    B.Live := False;
+    BuildFinish := Err('DECIDER_PANIC');
+    Exit;
+  end;
+
+  if B.Len > 0 then
+  begin
+    Base := PByte(A.Base);
+    Inc(Base, B.Start);
+    S.Ptr := PChar(Base);
+    S.Len := B.Len;
+  end;
+
+  { Вернуть арену к выровненной позиции, иначе следующая запись легла бы
+    со смещением и читалась бы медленнее, а на некоторых операциях —
+    неверно. Если выравнивание не помещается, арена просто остаётся как
+    есть: строка уже собрана, и терять её из-за набивки незачем. }
+  if AlignUp(A.Used, Aligned) and (Aligned <= A.Capacity) then
+  begin
+    Inc(A.Allocs);
+    A.Used := Aligned;
+    if A.Used > A.HighMark then
+      A.HighMark := A.Used;
+  end;
+
+  B.Live := False;
+  BuildFinish := Ok;
 end;
 
 end.

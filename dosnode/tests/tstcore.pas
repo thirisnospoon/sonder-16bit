@@ -17,7 +17,7 @@ program TstCore;
 {$R-}
 
 uses
-  TcResult, TcArena, TcTest;
+  TcResult, TcStr, TcArena, TcTest;
 
 {$I errcodes.inc}
 
@@ -30,7 +30,7 @@ const
   TapFile      = 'tstcore.tap';
 {$ENDIF}
 
-  PlannedTests = 49;
+  PlannedTests = 68;
 
 var
   A:      TArena;
@@ -41,6 +41,10 @@ var
   Dst:    PByte;
   BaseBefore: Pointer;
   OkCount: Integer;
+  B: TStrBuilder;
+  SS: TStr;
+  Chunk: string;
+  UsedBefore: Word;
 
 begin
   TestBegin(TapFile, PlannedTests);
@@ -219,6 +223,96 @@ begin
   TestTrue('отметка максимума переживает сброс', A.HighMark >= 300);
   TestEqInt('счётчик сбросов вырос', A.Resets, 1);
   TestTrue('арена жива после сброса', A.Live);
+
+  { ================================================================
+    Наращиваемая строка
+
+    Существует ради одного: собрать значение поля из кусков, которыми
+    его выдаёт потоковый разбор. Отсюда и главное правило — пока строка
+    растёт, из арены никто не выделяет. Правило проверяется, а не
+    декларируется: нарушить его случайно очень легко, а результатом
+    будет строка с чужими байтами в середине, то есть правдоподобный
+    неверный результат.
+    ================================================================ }
+
+  R := ArenaCreate(A, 1024, 'build');
+
+  R := BuildBegin(A, B);
+  TestResultOk('строка начинается', R);
+  R := BuildFinish(A, B, SS);
+  TestResultOk('пустая строка заканчивается', R);
+  TestEqInt('пустая строка нулевой длины', SS.Len, 0);
+
+  { Куски ложатся вплотную: между ними не должно быть набивки, иначе
+    строка перестанет быть непрерывной. }
+  ArenaReset(A);
+  R := BuildBegin(A, B);
+  Chunk := 'abc';
+  R := BuildAppend(A, B, @Chunk[1], 3);
+  TestResultOk('первый кусок дописан', R);
+  Chunk := 'de';
+  R := BuildAppend(A, B, @Chunk[1], 2);
+  TestResultOk('второй кусок дописан', R);
+  R := BuildFinish(A, B, SS);
+  TestResultOk('строка закончена', R);
+  TestEqInt('длина сложилась из кусков', SS.Len, 5);
+  TestEqStr('куски легли вплотную', StrHead(SS), 'abcde');
+
+  { Пустой кусок законен: разборщик выдаёт поле без текста. }
+  ArenaReset(A);
+  R := BuildBegin(A, B);
+  R := BuildAppend(A, B, @Chunk[1], 0);
+  TestResultOk('пустой кусок не ошибка', R);
+  R := BuildFinish(A, B, SS);
+  TestEqInt('от пустых кусков длина не выросла', SS.Len, 0);
+
+  { Чужое выделение посреди строки. Продолжать нельзя: байты уже не
+    подряд, и полученная строка содержала бы чужие данные. }
+  ArenaReset(A);
+  R := BuildBegin(A, B);
+  Chunk := 'ab';
+  R := BuildAppend(A, B, @Chunk[1], 2);
+  R := ArenaAlloc(A, 16, P);
+  TestResultOk('чужое выделение само по себе проходит', R);
+  R := BuildAppend(A, B, @Chunk[1], 2);
+  TestResultErr('вклинившееся выделение ломает строку',
+                R, ERR_DECIDER_PANIC);
+  R := BuildFinish(A, B, SS);
+  TestResultErr('сломанную строку нельзя закончить', R, ERR_DECIDER_PANIC);
+
+  { Откат возвращает арене всё, что строка успела занять. }
+  ArenaReset(A);
+  UsedBefore := A.Used;
+  R := BuildBegin(A, B);
+  Chunk := 'abcde';
+  R := BuildAppend(A, B, @Chunk[1], 5);
+  TestTrue('до отката арена занята', A.Used > UsedBefore);
+  BuildCancel(A, B);
+  TestEqInt('после отката арена вернулась на место', A.Used, UsedBefore);
+
+  { После окончания строки арена снова выровнена, иначе следующая запись
+    легла бы со смещением. }
+  ArenaReset(A);
+  R := BuildBegin(A, B);
+  Chunk := 'abc';
+  R := BuildAppend(A, B, @Chunk[1], 3);
+  R := BuildFinish(A, B, SS);
+  TestEqInt('после строки арена выровнена', A.Used mod ArenaAlign, 0);
+
+  { Строка длиннее арены отвергается, а не пишется мимо. }
+  R := ArenaCreate(A, 64, 'small');
+  R := BuildBegin(A, B);
+  OkCount := 0;
+  for I := 1 to 100 do
+  begin
+    R := BuildAppend(A, B, @Chunk[1], 3);
+    if R.Ok then Inc(OkCount) else Break;
+  end;
+  TestResultErr('строка длиннее арены отвергается',
+                R, ERR_INSUFFICIENT_CONTEXT);
+  TestTrue('до отказа что-то успело записаться', OkCount > 0);
+  TestTrue('за пределы арены не вышли', A.Used <= A.Capacity);
+  ArenaDestroy(A);
 
   { ================================================================
     Нагрузка: цикл выделения и сброса не должен ничего накапливать
