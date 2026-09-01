@@ -195,6 +195,21 @@ cmd_spikes() {
   return "$rc"
 }
 
+# ---------------------------------------------------------------------- java
+
+# Сборка и тесты оболочки. Java 8 — ограничение проекта, а не выбор:
+# восьмёрка последняя несёт CORBA в составе (ADR-0004). На хосте не
+# устанавливается ничего, всё в контейнере.
+cmd_java() {
+  need_docker
+  step "сборка и тесты Java"
+  if [ $# -eq 0 ]; then
+    bash ops/ci/mvn.sh verify
+  else
+    bash ops/ci/mvn.sh "$@"
+  fi
+}
+
 # ------------------------------------------------------------------- фаззинг
 
 # Долгий прогон фаззеров XML и кадрирования. В verify не входит: гейт
@@ -233,6 +248,7 @@ Sonder — цели
 
   spikes               прогнать спайки фазы 0
   soak [args]          долгий фаззинг XML и кадров, по умолчанию 5 минут
+  java [цели]          сборка и тесты оболочки, по умолчанию verify
   clean                удалить сборочные артефакты
 
 Состояние: фаза 0 пройдена, фаза 1 в работе.
@@ -255,6 +271,7 @@ case "${1:-help}" in
   test-native)        need_docker; cmd_test_native ;;
   spikes)             cmd_spikes ;;
   soak)               shift; need_docker; cmd_soak "$@" ;;
+  java)               shift; need_docker; cmd_java "$@" ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
   *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;

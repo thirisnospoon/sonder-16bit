@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sonder — корневой POM.
+
+  Java 8 везде, и это ограничение проекта, а не наследие: восьмёрка —
+  последний JDK, несущий CORBA в составе (ADR-0004). Отсюда следует всё
+  остальное: Spring Boot 2.7 — последняя ветка с поддержкой Java 8,
+  Hibernate 5 — последняя под неё же, Jaybird 4 — последняя, работающая
+  на восьмёрке (у пятого уже другой API: setHost вместо setServerName,
+  на чём спайк S6 и споткнулся).
+
+  Версии зафиксированы здесь, а не в модулях: разошедшиеся версии одной
+  библиотеки в двух модулях дают ошибку, которая проявляется в рантайме
+  и в одном из них.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>sonder</groupId>
+  <artifactId>sonder-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>Sonder</name>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>2.7.18</version>
+    <relativePath/>
+  </parent>
+
+  <modules>
+    <module>core</module>
+  </modules>
+
+  <properties>
+    <java.version>1.8</java.version>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Последняя ветка Jaybird под Java 8. -->
+    <jaybird.version>4.0.9.java8</jaybird.version>
+    <!-- Flyway 9 требует Java 11; 8.5.x — последняя под восьмёрку,
+         и Firebird она уже поддерживает (с 6.5). -->
+    <flyway.version>8.5.13</flyway.version>
+    <cxf.version>3.5.8</cxf.version>
+    <archunit.version>0.23.1</archunit.version>
+    <testcontainers.version>1.17.6</testcontainers.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.firebirdsql.jdbc</groupId>
+        <artifactId>jaybird</artifactId>
+        <version>${jaybird.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>${testcontainers.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <!-- Отчёты в текст: их читают в логе CI, а не в IDE. -->
+            <useFile>false</useFile>
+            <trimStackTrace>false</trimStackTrace>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
