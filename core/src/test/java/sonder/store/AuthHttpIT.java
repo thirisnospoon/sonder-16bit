@@ -69,6 +69,7 @@ class AuthHttpIT {
     void seed() throws Exception {
         assumeTrue(!System.getProperty("sonder.it.jdbcUrl", "").isEmpty(),
                 "нет sonder.it.jdbcUrl — запускать через ./sonder java-it");
+        disableStreaming();
         try (Connection c = dataSource.getConnection();
              Statement st = c.createStatement()) {
             st.executeUpdate("DELETE FROM sessions");
@@ -135,12 +136,12 @@ class AuthHttpIT {
         assertEquals(HttpStatus.UNAUTHORIZED, wrongPassword.getStatusCode());
         assertEquals(unknownNick.getStatusCode(), wrongPassword.getStatusCode(),
                 "статусы различаются — вход стал перечислителем учётных записей");
-        assertEquals(
-                unknownNick.getHeaders().getFirst("X-Sonder-Error"),
-                wrongPassword.getHeaders().getFirst("X-Sonder-Error"),
+        assertEquals(unknownNick.getBody().get("code"),
+                wrongPassword.getBody().get("code"),
                 "коды отказа различаются");
-        assertEquals("CREDENTIALS_INVALID",
-                wrongPassword.getHeaders().getFirst("X-Sonder-Error"));
+        assertEquals("CREDENTIALS_INVALID", wrongPassword.getBody().get("code"));
+        assertNotNull(wrongPassword.getBody().get("traceId"),
+                "контракт требует traceId в теле отказа");
     }
 
     @Test
@@ -169,7 +170,7 @@ class AuthHttpIT {
 
         assertEquals(HttpStatus.UNAUTHORIZED, none.getStatusCode());
         assertEquals(HttpStatus.UNAUTHORIZED, bogus.getStatusCode());
-        assertEquals("SESSION_INVALID", bogus.getHeaders().getFirst("X-Sonder-Error"));
+        assertEquals("SESSION_INVALID", bogus.getBody().get("code"));
     }
 
     /**
@@ -236,6 +237,24 @@ class AuthHttpIT {
         ResponseEntity<Map> response = http.postForEntity("/auth/login",
                 Collections.emptyMap(), Map.class);
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-        assertNull(response.getBody());
+        assertEquals("CREDENTIALS_INVALID", response.getBody().get("code"));
+    }
+
+    /**
+     * Клиент JDK на ответе 401 С ТЕЛОМ пытается повторить запрос с
+     * аутентификацией и падает: тело запроса уже отдано потоком.
+     * {@code HttpRetryException: cannot retry due to server
+     * authentication, in streaming mode}.
+     *
+     * <p>Это особенность тестового клиента, а не продукта: браузер и
+     * любой нормальный клиент такой ответ обрабатывают. Отключаем
+     * потоковую отправку — запрос буферизуется и повтор становится
+     * возможен.
+     */
+    private void disableStreaming() {
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setOutputStreaming(false);
+        http.getRestTemplate().setRequestFactory(factory);
     }
 }

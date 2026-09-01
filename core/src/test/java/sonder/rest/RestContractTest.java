@@ -51,9 +51,6 @@ class RestContractTest {
             "follow",
             "unfollow",
             "getFeed",
-            "createPost",
-            "getPost",
-            "deletePost",
             "banUser",
             "subscribe"));
 
@@ -193,7 +190,7 @@ class RestContractTest {
     @Test
     @DisplayName("отложенного не больше, чем было зафиксировано")
     void pendingDoesNotGrow() {
-        assertTrue(PENDING.size() <= 10,
+        assertTrue(PENDING.size() <= 7,
                 "список отложенного вырос до " + PENDING.size()
                         + ": контракт обещает больше, чем оболочка делает");
     }

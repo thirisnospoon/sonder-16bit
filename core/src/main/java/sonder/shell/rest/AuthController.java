@@ -75,8 +75,9 @@ public class AuthController {
     }
 
     @PostMapping("/auth/login")
-    public ResponseEntity<Map<String, String>> login(@RequestBody LoginRequest request)
+    public ResponseEntity<Map<String, Object>> login(@RequestBody(required = false) LoginRequest request)
             throws SQLException {
+        String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
         String nick = request == null ? null : request.getNick();
         String password = request == null ? null : request.getPassword();
 
@@ -102,11 +103,12 @@ public class AuthController {
             // время ответа выдало бы существование ника.
             boolean ok = Passwords.matches(password, hash) && userId != null;
             if (!ok) {
-                return error(HttpStatus.UNAUTHORIZED, ErrorCode.CREDENTIALS_INVALID);
+                return RestErrors.of(ErrorCode.CREDENTIALS_INVALID, traceId);
             }
 
             String token = SessionStore.open(c, userId, Instant.now());
-            return ResponseEntity.ok(Collections.singletonMap("token", token));
+            return ResponseEntity.ok(
+                    Collections.<String, Object>singletonMap("token", token));
         }
     }
 
@@ -124,14 +126,15 @@ public class AuthController {
     }
 
     @GetMapping("/auth/me")
-    public ResponseEntity<Map<String, String>> me(
+    public ResponseEntity<Map<String, Object>> me(
             @RequestHeader(value = "Authorization", required = false) String auth)
             throws SQLException {
+        String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
         String token = bearer(auth);
         try (Connection c = dataSource.getConnection()) {
             String userId = SessionStore.userOf(c, token, Instant.now());
             if (userId == null) {
-                return error(HttpStatus.UNAUTHORIZED, ErrorCode.SESSION_INVALID);
+                return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
             }
             try (PreparedStatement ps = c.prepareStatement(
                     "SELECT nick, display_name, role FROM users WHERE id = ?")) {
@@ -140,9 +143,9 @@ public class AuthController {
                     if (!rs.next()) {
                         // Сессия есть, пользователя нет: он удалён, пока
                         // сессия жила. Для клиента это то же самое.
-                        return error(HttpStatus.UNAUTHORIZED, ErrorCode.SESSION_INVALID);
+                        return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
                     }
-                    Map<String, String> body = new java.util.LinkedHashMap<>();
+                    Map<String, Object> body = new java.util.LinkedHashMap<>();
                     body.put("userId", userId);
                     body.put("nick", rs.getString(1));
                     body.put("displayName", rs.getString(2));
@@ -166,20 +169,4 @@ public class AuthController {
         return token.isEmpty() ? null : token;
     }
 
-    /**
-     * Ответ с кодом отказа. Статус берётся ИЗ КОНТРАКТА, а не пишется
-     * рядом с каждым отказом: два источника разошлись бы, и клиент получил
-     * бы 401 там, где ему обещали 409.
-     */
-    private static <T> ResponseEntity<T> error(HttpStatus expected, ErrorCode code) {
-        HttpStatus fromContract = HttpStatus.valueOf(code.httpStatus());
-        if (fromContract != expected) {
-            throw new IllegalStateException(
-                    "статус кода " + code + " в контракте " + fromContract
-                            + ", а здесь ожидался " + expected);
-        }
-        return ResponseEntity.status(fromContract)
-                .header("X-Sonder-Error", code.name())
-                .build();
-    }
 }

@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'CANNOT_MODERATE_PEER'
   | 'USER_NOT_FOUND'
   | 'POST_NOT_FOUND'
+  | 'RESOURCE_NOT_FOUND'
   | 'NICK_TAKEN'
   | 'SELF_FOLLOW'
   | 'ALREADY_FOLLOWING'
@@ -76,6 +77,7 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   CANNOT_MODERATE_PEER: { category: 'PERMISSION', httpStatus: 403, retryable: false },
   USER_NOT_FOUND: { category: 'NOT_FOUND', httpStatus: 404, retryable: false },
   POST_NOT_FOUND: { category: 'NOT_FOUND', httpStatus: 404, retryable: false },
+  RESOURCE_NOT_FOUND: { category: 'NOT_FOUND', httpStatus: 404, retryable: false },
   NICK_TAKEN: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   SELF_FOLLOW: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   ALREADY_FOLLOWING: { category: 'CONFLICT', httpStatus: 409, retryable: false },

@@ -26,8 +26,18 @@ DB_IMAGE="firebirdsql/firebird:5"
 DB_PATH="/var/lib/firebird/data/sonder.fdb"
 PASSWORD="masterkey"
 
+# Уборка обязана справляться с чужими остатками.
+#
+# Прерванный прогон оставляет на сети контейнер сборки, и следующий запуск
+# падает на «network already exists» — сообщение, по которому не видно, что
+# делать. Поэтому снимаются ВСЕ контейнеры сети, а не только база.
 cleanup() {
   docker rm -f "$DB" >/dev/null 2>&1
+  local attached
+  attached=$(docker network inspect "$NET"              --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null)
+  for name in $attached; do
+    docker rm -f "$name" >/dev/null 2>&1
+  done
   docker network rm "$NET" >/dev/null 2>&1
 }
 trap cleanup EXIT

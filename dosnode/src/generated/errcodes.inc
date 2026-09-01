@@ -37,6 +37,7 @@ const
   { --- NOT_FOUND --- }
   ERR_USER_NOT_FOUND             = 'USER_NOT_FOUND';
   ERR_POST_NOT_FOUND             = 'POST_NOT_FOUND';
+  ERR_RESOURCE_NOT_FOUND         = 'RESOURCE_NOT_FOUND';
 
   { --- CONFLICT --- }
   ERR_NICK_TAKEN                 = 'NICK_TAKEN';
@@ -59,7 +60,7 @@ const
   ERR_MALFORMED_ENVELOPE         = 'MALFORMED_ENVELOPE';
 
   { Число кодов: полезно для проверки полноты таблиц. }
-  ERR_CODE_COUNT = 29;
+  ERR_CODE_COUNT = 30;
 
   { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
     из TcResult: добавление длинного кода не должно молча

@@ -7,7 +7,6 @@ import sonder.contract.decider.Decision;
 import sonder.contract.decider.DeletePostCommand;
 import sonder.contract.decider.DeletePostRequest;
 import sonder.contract.decider.DomainEvent;
-import sonder.contract.decider.EventField;
 import sonder.contract.decider.PostContext;
 import sonder.contract.decider.PostStatus;
 import sonder.shell.outbox.Outbox;
@@ -132,56 +131,11 @@ public final class DeletePostHandler {
             Outbox.append(c, new OutboxEvent(
                     event.getAggregateId(),
                     event.getType(),
-                    payloadOf(event),
+                    Events.payloadOf(event),
                     traceId));
             written++;
         }
         return new Outcome(true, null, written);
     }
 
-    /**
-     * Поля события в JSON.
-     *
-     * <p>Собирается вручную, а не библиотекой: поля приходят от ядра парами
-     * «ключ, значение», и это ровно та форма, в которой они лежат в
-     * контракте. Тянуть сюда объектную модель значило бы придумать
-     * структуру, которой в решении нет.
-     */
-    private static String payloadOf(DomainEvent event) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (EventField field : event.getField()) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append('"').append(escape(field.getKey())).append("\":\"")
-              .append(escape(field.getValue())).append('"');
-        }
-        return sb.append('}').toString();
-    }
-
-    private static String escape(String s) {
-        if (s == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            switch (ch) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                case '\t': sb.append("\\t"); break;
-                default:
-                    if (ch < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) ch));
-                    } else {
-                        sb.append(ch);
-                    }
-            }
-        }
-        return sb.toString();
-    }
 }
