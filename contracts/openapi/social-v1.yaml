@@ -1,0 +1,384 @@
+# Контракт веб-клиента, версия 1.
+#
+# Это НЕ доменный контракт. Домен описан в soap/decider-v1.wsdl, а здесь —
+# то, что видит браузер. Разница принципиальная:
+#
+#   * запись отображается на команду ядра почти один к одному, но состояние
+#     для решения клиент не присылает — его собирает оболочка;
+#   * чтение к ядру не имеет отношения вовсе: оно обслуживается read-model
+#     и потому не ограничено пропускной способностью линии.
+#
+# Из этого файла генерируются типы TypeScript. Руками они не пишутся.
+
+openapi: 3.0.3
+
+info:
+  title: Sonder API
+  version: "1.0.0"
+  description: |
+    Мини-соцсеть. Чтение обслуживается денормализованными проекциями,
+    запись проходит через доменное ядро и ограничена примерно десятью
+    операциями в секунду — это измеренный потолок последовательной линии,
+    а не оценка.
+
+servers:
+  - url: /api
+
+tags:
+  - name: auth
+    description: Сессии. Аутентификация требует хранилища и живёт в оболочке.
+  - name: feed
+    description: Чтение. Не проходит через ядро.
+  - name: posts
+    description: Запись. Каждая операция — команда ядру.
+  - name: social
+    description: Подписки.
+  - name: admin
+    description: Модерация. Правила прав — в ядре.
+
+paths:
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Вход
+      description: |
+        Сессия выдаётся кукой HttpOnly; Secure; SameSite=Strict.
+        Токенов в localStorage нет: их читает любой скрипт на странице.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "204": { description: Вход выполнен, сессия в куке }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Выход
+      operationId: logout
+      responses:
+        "204": { description: Сессия отозвана }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Текущий пользователь
+      operationId: me
+      responses:
+        "200":
+          description: Профиль текущего пользователя
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /users:
+    post:
+      tags: [auth]
+      summary: Регистрация
+      description: Команда ядру RegisterUser. Уникальность ника решает ядро.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Пользователь создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserRef" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /users/{nick}:
+    get:
+      tags: [feed]
+      summary: Профиль
+      operationId: getUser
+      parameters:
+        - $ref: "#/components/parameters/Nick"
+      responses:
+        "200":
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfile" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /users/{nick}/follow:
+    put:
+      tags: [social]
+      summary: Подписаться
+      description: Команда ядру FollowUser. Запрет самоподписки — правило ядра.
+      operationId: follow
+      parameters:
+        - $ref: "#/components/parameters/Nick"
+      responses:
+        "204": { description: Подписка создана }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [social]
+      summary: Отписаться
+      operationId: unfollow
+      parameters:
+        - $ref: "#/components/parameters/Nick"
+      responses:
+        "204": { description: Подписки нет }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /feed:
+    get:
+      tags: [feed]
+      summary: Лента
+      description: |
+        Читается из проекции. Через доменное ядро не проходит и потолком
+        записи не ограничена. Согласованность eventual, лаг в SLO.
+      operationId: getFeed
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Страница ленты
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedPage" }
+
+  /posts:
+    post:
+      tags: [posts]
+      summary: Создать пост
+      description: |
+        Команда ядру CreatePost. Оболочка догружает бан-статус автора и
+        счётчики частоты, потому что ядро не умеет их считать: у него нет
+        ни базы, ни часов.
+      operationId: createPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePostRequest" }
+      responses:
+        "201":
+          description: Пост создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Post" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /posts/{postId}:
+    get:
+      tags: [feed]
+      summary: Пост
+      operationId: getPost
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: Пост
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Post" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [posts]
+      summary: Удалить пост
+      description: Идемпотентно. Повторное удаление принимается без событий.
+      operationId: deletePost
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "204": { description: Поста нет }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /admin/users/{nick}/ban:
+    post:
+      tags: [admin]
+      summary: Заблокировать
+      description: |
+        Команда ядру BanUser. Право на действие проверяет ядро: это доменный
+        вопрос, а не инфраструктурный. Причина обязательна — она идёт в аудит.
+      operationId: banUser
+      parameters:
+        - $ref: "#/components/parameters/Nick"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BanRequest" }
+      responses:
+        "204": { description: Пользователь заблокирован }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /events:
+    get:
+      tags: [feed]
+      summary: Поток обновлений
+      description: |
+        Server-Sent Events. Питается из того же конвейера outbox, что и
+        проекции, поэтому клиент не увидит события раньше, чем оно попадёт
+        в чтение.
+      operationId: subscribe
+      responses:
+        "200":
+          description: Поток событий
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+components:
+
+  parameters:
+    Nick:
+      name: nick
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Nick" }
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Id" }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор предыдущей страницы. Смещений нет — лента растёт.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+
+  responses:
+    Error:
+      description: Отказ
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+
+  schemas:
+
+    Id:
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,40}$"
+
+    Nick:
+      type: string
+      pattern: "^[a-z0-9_]{3,20}$"
+      description: Формат проверяет ядро, а не оболочка.
+
+    ApiError:
+      type: object
+      required: [code, traceId]
+      properties:
+        code:
+          type: string
+          description: |
+            Код из contracts/errors/errors.yaml. Список кодов и их категории
+            генерируются в web/src/generated/errors.ts.
+        detail:
+          type: string
+        traceId:
+          $ref: "#/components/schemas/Id"
+
+    LoginRequest:
+      type: object
+      required: [nick, password]
+      properties:
+        nick: { $ref: "#/components/schemas/Nick" }
+        password: { type: string, format: password, minLength: 8 }
+
+    RegisterRequest:
+      type: object
+      required: [nick, displayName, password]
+      properties:
+        nick: { $ref: "#/components/schemas/Nick" }
+        displayName: { type: string, minLength: 1, maxLength: 60 }
+        password: { type: string, format: password, minLength: 8 }
+
+    Role:
+      type: string
+      enum: [USER, MODERATOR, ADMIN]
+
+    UserRef:
+      type: object
+      required: [userId, nick, displayName]
+      properties:
+        userId: { $ref: "#/components/schemas/Id" }
+        nick: { $ref: "#/components/schemas/Nick" }
+        displayName: { type: string }
+
+    Me:
+      allOf:
+        - $ref: "#/components/schemas/UserRef"
+        - type: object
+          required: [role]
+          properties:
+            role: { $ref: "#/components/schemas/Role" }
+
+    UserProfile:
+      allOf:
+        - $ref: "#/components/schemas/UserRef"
+        - type: object
+          required: [postCount, followerCount, followingCount, following]
+          properties:
+            postCount: { type: integer }
+            followerCount: { type: integer }
+            followingCount: { type: integer }
+            following:
+              type: boolean
+              description: Подписан ли текущий пользователь на этого.
+
+    Post:
+      type: object
+      required: [postId, author, body, createdAt]
+      properties:
+        postId: { $ref: "#/components/schemas/Id" }
+        author: { $ref: "#/components/schemas/UserRef" }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    CreatePostRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: |
+            Границы дублируются здесь только для подсказки в интерфейсе.
+            Решение всё равно принимает ядро: проверка на клиенте — удобство,
+            а не правило.
+
+    BanRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 200 }
+
+    FeedPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Post" }
+        nextCursor: { type: string }
+        hasMore: { type: boolean }

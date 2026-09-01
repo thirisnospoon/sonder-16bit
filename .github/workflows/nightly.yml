@@ -1,0 +1,72 @@
+# Ночная сборка: дорогие проверки, которым не место в гейте PR.
+#
+# Спайки фазы 0 остаются в CI не как формальность. Они закрепляют измерения,
+# на которых стоит вся архитектура: модель памяти, потолок линии, устойчивость
+# эмулятора. Если однажды окружение изменится и число уедет, это должно
+# всплыть здесь, а не через полгода в проектном документе.
+#
+# S3 гоняет один и тот же бинарник двадцать раз подряд: он проверяет не
+# программу, а стабильность headless-прогона (docs/RISKS.md, R3). Двадцать
+# прогонов в PR — это минута впустую на каждом коммите, поэтому сюда.
+
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+
+  spikes:
+    name: Спайки фазы 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Образ тулчейна
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/toolchain/Dockerfile
+          tags: sonder/dos-toolchain:3.2.2
+          load: true
+          cache-from: type=gha,scope=dos-toolchain
+          cache-to: type=gha,scope=dos-toolchain,mode=max
+
+      - name: S1 · файберы, модель medium
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 bash spikes/s1-fibers/run.sh medium
+
+      - name: S1b · файберы в дальней куче, модель large
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 bash spikes/s1-fibers/run-b.sh large
+
+      - name: S2 · последовательный транспорт
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 bash spikes/s2-transport/run.sh 1
+
+      - name: S3 · устойчивость headless-прогона, 20 раз
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 bash spikes/s3-headless/run.sh 20
+
+      - name: S5 · CORBA между контейнерами
+        run: bash spikes/s5-iiop/run.sh
+
+      - name: Логи прогонов
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-logs
+          path: |
+            spikes/**/out/**/*.TAP
+            spikes/**/out/**/*.log
+            spikes/**/out/**/result.json
+          retention-days: 14

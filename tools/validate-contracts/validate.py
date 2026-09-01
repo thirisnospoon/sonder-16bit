@@ -199,6 +199,66 @@ def validate_idl() -> None:
             checks_bump()
 
 
+# -------------------------------------------------------------------- openapi
+def validate_openapi() -> None:
+    paths = sorted((CONTRACTS / "openapi").glob("*.yaml"))
+    check("нет ни одного OpenAPI в contracts/openapi", bool(paths))
+
+    for path in paths:
+        rel = path.relative_to(ROOT)
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            fail(f"{rel}: не разбирается как YAML: {exc}")
+            continue
+
+        check(f"{rel}: нет секции paths", bool(doc.get("paths")))
+        check(f"{rel}: нет версии в info", bool(doc.get("info", {}).get("version")))
+
+        # Каждая операция обязана иметь operationId: из него генерируются
+        # имена функций клиента, и без него генератор придумает своё.
+        methods = ("get", "post", "put", "delete", "patch")
+        seen_ids: set[str] = set()
+        for route, item in (doc.get("paths") or {}).items():
+            for method in methods:
+                op = (item or {}).get(method)
+                if not op:
+                    continue
+                op_id = op.get("operationId")
+                check(f"{rel}: {method.upper()} {route} без operationId", bool(op_id))
+                if op_id:
+                    check(f"{rel}: operationId {op_id} повторяется",
+                          op_id not in seen_ids)
+                    seen_ids.add(op_id)
+                check(f"{rel}: {method.upper()} {route} без responses",
+                      bool(op.get("responses")))
+
+        # Все ссылки должны разрешаться: битая ссылка ломает кодогенерацию,
+        # но при беглом чтении незаметна.
+        def walk(node, where: str):
+            if isinstance(node, dict):
+                ref = node.get("$ref")
+                if isinstance(ref, str):
+                    checks_bump()
+                    if not ref.startswith("#/"):
+                        fail(f"{rel}: внешняя ссылка {ref} в {where}")
+                    else:
+                        cur = doc
+                        for part in ref[2:].split("/"):
+                            if isinstance(cur, dict) and part in cur:
+                                cur = cur[part]
+                            else:
+                                fail(f"{rel}: ссылка {ref} не разрешается ({where})")
+                                break
+                for k, v in node.items():
+                    walk(v, f"{where}.{k}")
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    walk(v, f"{where}[{i}]")
+
+        walk(doc, "root")
+
+
 # ----------------------------------------------------------------------- main
 def main() -> int:
     if not CONTRACTS.exists():
@@ -208,6 +268,7 @@ def main() -> int:
     errors_doc = validate_errors()
     validate_wsdl(errors_doc)
     validate_idl()
+    validate_openapi()
 
     print(f"проверок выполнено: {checks}")
     if problems:

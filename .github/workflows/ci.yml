@@ -1,0 +1,100 @@
+# Гейт на каждый PR и push.
+#
+# Ломает сборку, а не предупреждает: правило без проверки в CI считается
+# несуществующим (docs/ENGINEERING.md §2).
+#
+# Дорогая часть — образ тулчейна: он собирает кросс-компилятор FPC i8086-msdos
+# из исходников и тянет ~230 МБ. Кэшируется слоями через GitHub Actions cache,
+# поэтому платим полную цену только при изменении ops/toolchain.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # Быстрый барьер: не занимать раннер тяжёлой сборкой, если контракты
+  # уже не согласованы.
+  contracts:
+    name: Контракты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Установить зависимости
+        run: pip install --quiet pyyaml
+
+      - name: Переводы строк
+        run: ./sonder check-eol
+
+      - name: Проверка контрактов
+        run: python tools/validate-contracts/validate.py
+
+      - name: Самопроверка валидатора
+        run: python tools/validate-contracts/selftest.py
+
+      - name: Кодогенерация
+        run: |
+          python tools/gen-errors/gen_errors.py
+          python tools/wsdl2pas/wsdl2pas.py
+
+      # Сгенерированный код лежит в репозитории, чтобы его было видно на
+      # ревью. Значит он обязан совпадать с тем, что порождается сейчас.
+      - name: Дрейф сгенерированного кода
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::сгенерированный код разошёлся с контрактами"
+            git diff --stat
+            echo "перегенерируй: ./sonder codegen"
+            exit 1
+          fi
+          echo "совпадает с контрактами"
+
+  dosnode:
+    name: DOS-нода
+    needs: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Образ тулчейна
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/toolchain/Dockerfile
+          tags: sonder/dos-toolchain:3.2.2
+          load: true
+          cache-from: type=gha,scope=dos-toolchain
+          cache-to: type=gha,scope=dos-toolchain,mode=max
+
+      # Сгенерированный код обязан не только собираться, но и работать:
+      # раскладка записей может скомпилироваться и оказаться нерабочей.
+      - name: Сгенерированный Pascal собирается и работает
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            sonder/dos-toolchain:3.2.2 \
+            bash dosnode/build/compile-generated.sh
+
+      - name: Артефакты при провале
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dosnode-logs
+          path: |
+            dosnode/build/out/**/*.log
+            dosnode/build/out/**/*.TAP
+          retention-days: 7

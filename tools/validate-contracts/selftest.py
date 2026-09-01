@@ -77,6 +77,20 @@ CASES: list[Case] = [
         "кириллицу не принимает",
     ),
     (
+        "битая ссылка в OpenAPI",
+        "contracts/openapi/social-v1.yaml",
+        '$ref: "#/components/schemas/FeedPage"',
+        '$ref: "#/components/schemas/NoSuchThing"',
+        "не разрешается",
+    ),
+    (
+        "операция OpenAPI без operationId",
+        "contracts/openapi/social-v1.yaml",
+        "      operationId: getFeed\n",
+        "",
+        "без operationId",
+    ),
+    (
         "исчез код INSUFFICIENT_CONTEXT",
         "contracts/errors/errors.yaml",
         "  - code: INSUFFICIENT_CONTEXT",
