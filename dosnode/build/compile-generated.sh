@@ -144,8 +144,14 @@ PAS
 cp "$ROOT/dosnode/src/generated/dcdtypes.pas" "$OUT/"
 cp "$ROOT/dosnode/src/generated/errcodes.inc" "$OUT/"
 
+# Путь к TurboCore, а не копия его модулей: сгенерированный код берёт TStr
+# из TcStr (вокабуляр принадлежит фреймворку), и собирать пробник против
+# копии значило бы не заметить расхождения — ровно того, ради чего этот
+# шаг существует.
+CORE="$ROOT/dosnode/src/turbocore"
+
 echo "--- компиляция, модель $MODEL ---"
-if ! fpc-dos "$MODEL" -FE"$OUT" -FU"$OUT" -Fi"$OUT" -Fu"$OUT" \
+if ! fpc-dos "$MODEL" -FE"$OUT" -FU"$OUT" -Fi"$OUT" -Fu"$OUT" -Fu"$CORE" \
        -oPROBE.EXE "$OUT/probe.pas" > "$OUT/compile.log" 2>&1; then
   echo "  ПРОВАЛ: сгенерированный код не компилируется"
   grep -E 'Error|Fatal' "$OUT/compile.log" | head -20 | sed 's/^/    /'

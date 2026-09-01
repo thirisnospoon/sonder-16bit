@@ -63,19 +63,35 @@ ensure_dos() { have_image "$DOS_IMAGE" || cmd_image_dos; }
 # Разработка на Windows, исполнение в Linux-контейнерах: shell-скрипт с CRLF
 # там не запускается вовсе (docs/RISKS.md, R10).
 cmd_check_eol() {
-  step "переводы строк в исполняемых файлах"
+  step "переводы строк"
+  # Список файлов берётся у самого git, а не дублируется здесь. Раньше он был
+  # вписан в эту функцию вторым экземпляром и разошёлся с .gitattributes:
+  # markdown из-под проверки выпал и набрал CRLF во всех документах.
+  # Разошедшиеся списки — тот же класс дефекта, что и разошедшийся с кодом
+  # документ, и ловится он так же плохо.
+  #
+  # Шаблон задаётся через printf, а не ANSI-C-кавычками: их разворачивает не
+  # всякая оболочка, а неразвёрнутые дают ПУСТОЙ шаблон, под который подходит
+  # любой файл. Проверка тогда не молчит вхолостую, а срабатывает на всём
+  # подряд, и отличить это от настоящей поломки с одного взгляда нельзя.
+  local cr
+  cr="$(printf '\015')"
   local bad
-  bad=$(find . -path ./.git -prune -o \
-        \( -name '*.sh' -o -name '*.py' -o -name '*.pas' -o -name '*.java' \
-           -o -name 'Makefile' -o -name 'Dockerfile' -o -name 'sonder' \) -print 2>/dev/null \
-        | xargs -r grep -lU $'\r' 2>/dev/null)
+  bad=$(git ls-files \
+        | git check-attr --stdin eol \
+        | sed -n 's/: eol: lf$//p' \
+        | while IFS= read -r f; do
+            if [ -f "$f" ] && grep -qU "$cr" "$f"; then echo "$f"; fi
+          done)
   if [ -n "$bad" ]; then
-    echo "    файлы с CRLF:"
+    echo "    файлы с CRLF (по .gitattributes ожидается LF):"
     echo "$bad" | sed 's/^/      /'
+    echo "    починить: git add --renormalize . && git checkout -- ."
     return 1
   fi
   echo "    все LF"
 }
+
 
 cmd_contracts() {
   ensure_py

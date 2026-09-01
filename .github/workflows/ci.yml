@@ -89,6 +89,15 @@ jobs:
             sonder/dos-toolchain:3.2.2 \
             bash dosnode/build/compile-generated.sh
 
+      # Прогон на обоих таргетах. Расхождение между ними — дефект, а не
+      # особенность платформы (ADR-0005). Шаг добавлен после того, как
+      # проверка сгенерированного кода несколько коммитов была красной:
+      # локально гонялись тесты, в CI — всё остальное, и слепые зоны
+      # сошлись так, что регрессию не увидел никто.
+      - name: Тесты TurboCore на обоих таргетах
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work             sonder/dos-toolchain:3.2.2             bash dosnode/build/test.sh both
+
       - name: Артефакты при провале
         if: failure()
         uses: actions/upload-artifact@v4
