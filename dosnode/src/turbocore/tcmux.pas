@@ -56,6 +56,13 @@ const
 type
   PFrame = ^TFrame;
 
+  { Обработчик управляющего канала.
+
+    Кадры нулевого канала не адресованы командам: это служебный обмен —
+    приветствие, метрики, отзыв. Без отдельного обработчика они считались
+    бы неприкаянными, и полезный счётчик превратился бы в шум. }
+  TControlHandler = procedure(const F: TFrame);
+
   TChanState = (
     csFree,
     csWaiting,   { запрос отправлен, ответ не пришёл }
@@ -66,6 +73,7 @@ type
     Sent:          LongInt;   { кадров положено в кольцо }
     Received:      LongInt;   { кадров разобрано из линии }
     Delivered:     LongInt;   { кадров доставлено владельцу канала }
+    Control:       LongInt;   { кадров управляющего канала }
     Unrouted:      LongInt;   { кадр пришёл на канал, которого никто не ждёт }
     Backpressure:  LongInt;   { отказов из-за заполненного кольца }
     IdleResets:    LongInt;   { сигналов о паузе, бросивших недособранное }
@@ -73,6 +81,10 @@ type
   end;
 
 procedure MuxReset;
+
+{ Назначить обработчик управляющего канала. Без него служебные кадры
+  просто отбрасываются, но считаются отдельно от неприкаянных. }
+procedure MuxSetControlHandler(H: TControlHandler);
 
 { Занять канал. Reply указывает, куда положить ответ; память принадлежит
   вызывающему и обязана пережить ожидание. }
@@ -116,6 +128,7 @@ var
     этом не там, где объявление, а там, где вызов. }
   Rx:    TDecoder;
   Stats: TMuxStats;
+  Control: TControlHandler;
 
 procedure MuxReset;
 var
@@ -132,6 +145,12 @@ begin
   Used := 0;
   DecoderReset(Rx);
   FillChar(Stats, SizeOf(Stats), 0);
+  Control := nil;
+end;
+
+procedure MuxSetControlHandler(H: TControlHandler);
+begin
+  Control := H;
 end;
 
 function MuxOpen(Owner: TFiberId; Reply: PFrame; var Chan: Byte): TResult;
@@ -233,6 +252,16 @@ var
 begin
   Inc(Stats.Received);
   C := F.Channel;
+
+  { Управляющий канал обслуживается отдельно: его кадры не адресованы
+    ни одной команде. }
+  if C = ChanControl then
+  begin
+    Inc(Stats.Control);
+    if @Control <> nil then
+      Control(F);
+    Exit;
+  end;
 
   if Chans[C].State <> csWaiting then
   begin
