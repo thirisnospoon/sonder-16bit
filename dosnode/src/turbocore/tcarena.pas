@@ -31,7 +31,7 @@ unit TcArena;
 interface
 
 uses
-  TcResult;
+  TcResult, TcStr;
 
 const
   { Выравнивание. На 16 битах слово, на нативном таргете указатель.
@@ -78,6 +78,11 @@ function ArenaAllocZero(var A: TArena; Bytes: Word; var P: Pointer): TResult;
 { Скопировать блок в арену. Возвращает указатель на копию. }
 function ArenaDup(var A: TArena; Src: Pointer; Bytes: Word;
                   var P: Pointer): TResult;
+
+{ Скопировать строку в арену. Копия принадлежит арене и потому переживает
+  исходник — в отличие от результата StrView, который живёт ровно столько,
+  сколько живёт то, на что он смотрит. }
+function ArenaDupStr(var A: TArena; const Src: TStr; var Dst: TStr): TResult;
 
 { Сбросить арену целиком. Указатели, выданные ранее, становятся
   недействительными немедленно. }
@@ -234,6 +239,33 @@ begin
   if R.Ok then
     Move(Src^, P^, Bytes);
   ArenaDup := R;
+end;
+
+function ArenaDupStr(var A: TArena; const Src: TStr; var Dst: TStr): TResult;
+var
+  R: TResult;
+  P: Pointer;
+begin
+  { Пустая строка копируется в пустую: выделять ноль байт нельзя, а
+    отказывать здесь незачем — пустое тело это законное значение. }
+  if StrIsEmpty(Src) then
+  begin
+    Dst := StrNil;
+    ArenaDupStr := Ok;
+    Exit;
+  end;
+
+  R := ArenaAlloc(A, Src.Len, P);
+  if not R.Ok then
+  begin
+    ArenaDupStr := R;
+    Exit;
+  end;
+
+  Move(Src.Ptr^, P^, Src.Len);
+  Dst.Ptr := PChar(P);
+  Dst.Len := Src.Len;
+  ArenaDupStr := Ok;
 end;
 
 procedure ArenaReset(var A: TArena);

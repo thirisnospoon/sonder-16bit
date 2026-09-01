@@ -32,6 +32,10 @@ public enum ErrorCode {
     COMMENT_BODY_TOO_LONG(Category.VALIDATION, 400, false, true),
     /** Причина блокировки обязательна: она попадает в аудит */
     BAN_REASON_EMPTY(Category.VALIDATION, 400, false, true),
+    /** Причина блокировки длиннее допустимого */
+    BAN_REASON_TOO_LONG(Category.VALIDATION, 400, false, true),
+    /** Отображаемое имя пустое или длиннее допустимого */
+    DISPLAY_NAME_INVALID(Category.VALIDATION, 400, false, true),
     /** Сессия не найдена, истекла или отозвана */
     SESSION_INVALID(Category.AUTH, 401, false, false),
     /** Неверная пара логин и пароль */

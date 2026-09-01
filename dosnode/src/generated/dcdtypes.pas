@@ -14,16 +14,15 @@ unit DcdTypes;
 
 interface
 
-type
-  { Строка произвольной длины. Тип string в TP7 не длиннее 255
-    байт, а тело поста длиннее, поэтому указатель в арену и
-    длина. Владение — за ареной команды, освобождать не нужно. }
-  { PChar берётся из System, здесь не переобъявляется. }
-  TStr = record
-    Ptr: PChar;
-    Len: Word;
-  end;
+uses
+  TcStr;
 
+{ TStr берётся из TcStr, а не объявляется здесь.
+  Вокабуляр принадлежит фреймворку: если бы генератор
+  объявлял свой тип строки, каждый сгенерированный модуль
+  имел бы несовместимый с остальными. }
+
+type
   TRole = (Role_USER, Role_MODERATOR, Role_ADMIN);
   TUserStatus = (UserStatus_ACTIVE, UserStatus_BANNED, UserStatus_DELETED);
   TPostStatus = (PostStatus_VISIBLE, PostStatus_DELETED);

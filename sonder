@@ -95,6 +95,8 @@ cmd_codegen() {
   ensure_py
   step "коды отказа на три языка"
   run_py python tools/gen-errors/gen_errors.py || return 1
+  step "границы домена"
+  run_py python tools/gen-limits/gen_limits.py || return 1
   step "стабы Pascal из WSDL"
   run_py python tools/wsdl2pas/wsdl2pas.py || return 1
 }

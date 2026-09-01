@@ -91,6 +91,13 @@ CASES: list[Case] = [
         "без operationId",
     ),
     (
+        "граница домена разошлась с подсказкой OpenAPI",
+        "contracts/domain/limits.yaml",
+        "  post_body_max_len:\n    value: 1000",
+        "  post_body_max_len:\n    value: 900",
+        "Интерфейс разрешит",
+    ),
+    (
         "исчез код INSUFFICIENT_CONTEXT",
         "contracts/errors/errors.yaml",
         "  - code: INSUFFICIENT_CONTEXT",

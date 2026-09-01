@@ -259,6 +259,65 @@ def validate_openapi() -> None:
         walk(doc, "root")
 
 
+# ------------------------------------------------------------------- limits
+def validate_limits() -> None:
+    """Границы домена и подсказки OpenAPI обязаны совпадать.
+
+    Расхождение — это ситуация, где интерфейс разрешает пользователю ввести
+    то, что ядро потом отвергнет. Пользователь видит отказ уже после отправки,
+    и виновата в этом рассинхронизация двух чисел, а не он.
+    """
+    path = CONTRACTS / "domain" / "limits.yaml"
+    if not path.exists():
+        fail(f"нет {path.relative_to(ROOT)}")
+        return
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    limits = doc.get("limits", {})
+    check("limits.yaml: нет ни одной границы", bool(limits))
+
+    for name, spec in limits.items():
+        check(f"limits.yaml: у границы {name} нет значения", "value" in spec)
+        check(f"limits.yaml: граница {name} не положительна",
+              isinstance(spec.get("value"), int) and spec["value"] > 0)
+        check(f"limits.yaml: граница {name} без описания",
+              bool(str(spec.get("description", "")).strip()))
+
+    # Сверка с OpenAPI по ссылкам вида Schema.field.maxLength.
+    api_path = CONTRACTS / "openapi" / "social-v1.yaml"
+    if not api_path.exists():
+        return
+    api = yaml.safe_load(api_path.read_text(encoding="utf-8"))
+    schemas = (api.get("components") or {}).get("schemas") or {}
+
+    for name, spec in limits.items():
+        ref = spec.get("openapi")
+        if not ref:
+            continue
+        checks_bump()
+        parts = ref.split(".")
+        if len(parts) != 3:
+            fail(f"limits.yaml: ссылка {ref} у {name} не вида Схема.поле.атрибут")
+            continue
+        schema_name, field, attr = parts
+        schema = schemas.get(schema_name)
+        if not schema:
+            fail(f"limits.yaml: в OpenAPI нет схемы {schema_name} (ссылка у {name})")
+            continue
+        props = schema.get("properties") or {}
+        prop = props.get(field)
+        if prop is None:
+            fail(f"limits.yaml: в схеме {schema_name} нет поля {field} (ссылка у {name})")
+            continue
+        actual = prop.get(attr)
+        if actual != spec["value"]:
+            fail(
+                f"граница {name} = {spec['value']}, а в OpenAPI "
+                f"{schema_name}.{field}.{attr} = {actual}. Интерфейс разрешит "
+                f"пользователю то, что ядро отвергнет"
+            )
+
+
 # ----------------------------------------------------------------------- main
 def main() -> int:
     if not CONTRACTS.exists():
@@ -269,6 +328,7 @@ def main() -> int:
     validate_wsdl(errors_doc)
     validate_idl()
     validate_openapi()
+    validate_limits()
 
     print(f"проверок выполнено: {checks}")
     if problems:

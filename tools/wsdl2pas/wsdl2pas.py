@@ -186,17 +186,11 @@ BANNER = """{ СГЕНЕРИРОВАНО. Не править руками.
 
 def emit_pascal(model: Model) -> str:
     o: list[str] = [BANNER, "", "unit DcdTypes;", "", "{$MODE TP}", "",
-                    "interface", "", "type"]
-
-    o.append("  { Строка произвольной длины. Тип string в TP7 не длиннее 255")
-    o.append("    байт, а тело поста длиннее, поэтому указатель в арену и")
-    o.append("    длина. Владение — за ареной команды, освобождать не нужно. }")
-    o.append("  { PChar берётся из System, здесь не переобъявляется. }")
-    o.append("  TStr = record")
-    o.append("    Ptr: PChar;")
-    o.append("    Len: Word;")
-    o.append("  end;")
-    o.append("")
+                    "interface", "", "uses", "  TcStr;", "",
+                    "{ TStr берётся из TcStr, а не объявляется здесь.",
+                    "  Вокабуляр принадлежит фреймворку: если бы генератор",
+                    "  объявлял свой тип строки, каждый сгенерированный модуль",
+                    "  имел бы несовместимый с остальными. }", "", "type"]
 
     for name, values in model.enums.items():
         pas = pas_type_name(name)

@@ -51,6 +51,14 @@ codes:
     category: VALIDATION
     description: "Причина блокировки обязательна: она попадает в аудит"
     decided_by: core
+  - code: BAN_REASON_TOO_LONG
+    category: VALIDATION
+    description: "Причина блокировки длиннее допустимого"
+    decided_by: core
+  - code: DISPLAY_NAME_INVALID
+    category: VALIDATION
+    description: "Отображаемое имя пустое или длиннее допустимого"
+    decided_by: core
 
   # --- AUTH -----------------------------------------------------------------
   # Аутентификация требует обращения к хранилищу и потому целиком в оболочке.
