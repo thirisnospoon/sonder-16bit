@@ -22,7 +22,7 @@ program TstSoap;
 
 uses
   TcResult, TcStr, TcArena, TcTest, TcFrame, TcXml, TcSoap,
-  DcdTypes, DmDecide;
+  DcdTypes, DcdSrv, DmDecide;
 
 {$I errcodes.inc}
 {$I dmlimits.inc}
@@ -34,7 +34,7 @@ const
   TapFile = 'tstsoap.tap';
 {$ENDIF}
 
-  PlannedTests = 64;
+  PlannedTests = 70;
 
 var
   A: TArena;
@@ -49,6 +49,7 @@ var
   Overflow: Boolean;
   OpSeen: string;
   Fields: Integer;
+  Unknowns, BadValues: Integer;
 
   { Что записал писатель. }
   Out_: array[0..8191] of Char;
@@ -92,35 +93,21 @@ begin
     Add(StrHead(Field) + '=' + StrHead(Value) + ';');
 end;
 
-{ Обработчик, набивающий настоящую запись. Ровно такой предстоит
-  порождать wsdl2pas: разбор по паре «группа, поле» без всякого дерева. }
-procedure FillCreatePost(const Group, Field, Value: TStr); far;
+{ Набивка записи идёт СГЕНЕРИРОВАННЫМ кодом. Раньше здесь лежала ручная
+  заготовка: она задавала форму, в которую предстояло попасть генератору.
+  Форма есть, генератор в неё попал, и держать заготовку рядом значило бы
+  проверять её вместо него.
+
+  Обёртка нужна только затем, что обработчик TcSoap — процедура без
+  результата, а сгенерированная функция исход возвращает. Исход считается:
+  неизвестное поле и неразобранное значение — разные вещи, и молчать ни о
+  той ни о другой нельзя (R5). }
+procedure OnCreatePostField(const Group, Field, Value: TStr); far;
 begin
-  if StrEqPas(Group, 'meta') then
-  begin
-    if StrEqPas(Field, 'traceId') then Req.meta.traceId := Value;
-    if StrEqPas(Field, 'commandId') then Req.meta.commandId := Value;
-  end
-  else if StrEqPas(Group, 'command') then
-  begin
-    if StrEqPas(Field, 'postId') then Req.command.postId := Value;
-    if StrEqPas(Field, 'body') then Req.command.body := Value;
-  end
-  else if StrEqPas(Group, 'actor') then
-  begin
-    if StrEqPas(Field, 'userId') then Req.actor.userId := Value;
-    if StrEqPas(Field, 'role') then
-    begin
-      if StrEqPas(Value, 'ADMIN') then Req.actor.role := Role_ADMIN
-      else if StrEqPas(Value, 'MODERATOR') then Req.actor.role := Role_MODERATOR
-      else Req.actor.role := Role_USER;
-    end;
-    if StrEqPas(Field, 'status') then
-    begin
-      if StrEqPas(Value, 'BANNED') then Req.actor.status := UserStatus_BANNED
-      else if StrEqPas(Value, 'DELETED') then Req.actor.status := UserStatus_DELETED
-      else Req.actor.status := UserStatus_ACTIVE;
-    end;
+  Inc(Fields);
+  case DcdSrv.FillCreatePost(Req, Group, Field, Value) of
+    foUnknown:  Inc(Unknowns);
+    foBadValue: Inc(BadValues);
   end;
 end;
 
@@ -522,7 +509,8 @@ begin
   ArenaReset(A);
   FillChar(Req, SizeOf(Req), 0);
   Trace := ''; Overflow := False; OpSeen := ''; Fields := 0;
-  SoapReaderInit(Rd, A, OnOp, FillCreatePost);
+  Unknowns := 0; BadValues := 0;
+  SoapReaderInit(Rd, A, OnOp, OnCreatePostField);
 
   { Документ собирается кусками, а не одной конкатенацией: string в
     диалекте TP не длиннее 255 байт и обрезается МОЛЧА. Первая редакция
@@ -548,6 +536,8 @@ begin
   R := SoapFinish(Rd);
   TestResultOk('команда разобрана', R);
   TestEqStr('операция опознана', OpSeen, 'createPost');
+  TestEqInt('все поля команды известны генератору', Unknowns, 0);
+  TestEqInt('все значения разобрались', BadValues, 0);
 
   TestEqStr('идентификатор поста дошёл', StrHead(Req.command.postId), 'p-1001');
   TestEqStr('тело дошло с разрешённой сущностью',
@@ -566,20 +556,10 @@ begin
   { Ответ. }
   StartWrite;
   SoapBeginEnvelope(W);
-  SoapOpen(W, 'createPostResponse');
-  SoapElementBool(W, 'accepted', D.accepted);
-  SoapElement(W, 'errorCode', D.errorCode);
-  if D.event <> nil then
-  begin
-    SoapOpen(W, 'event');
-    SoapElement(W, 'type', D.event^.Value.type_);
-    SoapElement(W, 'aggregateId', D.event^.Value.aggregateId);
-    SoapClose(W, 'event');
-  end;
-  SoapClose(W, 'createPostResponse');
+  WriteDecision(W, 'createPostResponse', D);
   SoapEndEnvelope(W);
   R := SoapWriterFlush(W);
-  TestResultOk('ответ записан', R);
+  TestResultOk('ответ записан сгенерированным кодом', R);
 
   { И разбирается обратно — уже другим разборщиком, как это сделал бы
     гейтвей на своей стороне. }
@@ -599,13 +579,36 @@ begin
   TestResultOk('ответ разобран обратно', R);
   TestEqStr('операция ответа опознана', OpSeen, 'createPostResponse');
   TestEqStr('решение и событие дошли целиком', Trace,
-            'accepted=true;errorCode=;event.type=post.created;' +
-            'event.aggregateId=p-1001;');
+            'accepted=true;errorCode=;errorDetail=;' +
+            'event.type=post.created;event.aggregateId=p-1001;');
+
+  { Неизвестное поле и негодное значение — разные вещи, и генератор
+    обязан их различать. Молча оставить в записи ноль значило бы решить
+    по неполным данным (R5). }
+  ArenaReset(A);
+  FillChar(Req, SizeOf(Req), 0);
+  Fields := 0; Unknowns := 0; BadValues := 0;
+  SoapReaderInit(Rd, A, OnOp, OnCreatePostField);
+  DocClear;
+  DocAdd('<soap:Envelope xmlns:soap="');
+  DocAdd(SoapNs);
+  DocAdd('"><soap:Body><createPost>');
+  DocAdd('<actor><userId>u-a</userId><role>КОРОЛЬ</role>');
+  DocAdd('<postsLastHour>не число</postsLastHour>');
+  DocAdd('<неведомое>x</неведомое></actor>');
+  DocAdd('</createPost></soap:Body></soap:Envelope>');
+  FeedDoc(DocLen);
+  R := SoapFinish(Rd);
+  TestResultOk('конверт с негодными полями всё же разобран', R);
+  TestEqInt('неизвестное поле посчитано отдельно', Unknowns, 1);
+  TestEqInt('негодные значения посчитаны отдельно', BadValues, 2);
+  TestEqInt('годное поле при этом дошло', Req.actor.userId.Len, 3);
 
   { Круг с отказом: ядро отвергает, и код отказа доезжает до клиента. }
   ArenaReset(A);
   FillChar(Req, SizeOf(Req), 0);
-  SoapReaderInit(Rd, A, OnOp, FillCreatePost);
+  Fields := 0; Unknowns := 0; BadValues := 0;
+  SoapReaderInit(Rd, A, OnOp, OnCreatePostField);
   DocClear;
   DocAdd('<soap:Envelope xmlns:soap="');
   DocAdd(SoapNs);
@@ -627,10 +630,7 @@ begin
 
   StartWrite;
   SoapBeginEnvelope(W);
-  SoapOpen(W, 'createPostResponse');
-  SoapElementBool(W, 'accepted', D.accepted);
-  SoapElement(W, 'errorCode', D.errorCode);
-  SoapClose(W, 'createPostResponse');
+  WriteDecision(W, 'createPostResponse', D);
   SoapEndEnvelope(W);
   R := SoapWriterFlush(W);
   TestResultOk('ответ с отказом записан', R);
@@ -649,7 +649,7 @@ begin
   R := SoapFinish(Rd);
   TestResultOk('ответ с отказом разобран', R);
   TestEqStr('код отказа доехал до клиента', Trace,
-            'accepted=false;errorCode=POST_BODY_EMPTY;');
+            'accepted=false;errorCode=POST_BODY_EMPTY;errorDetail=;');
 
   Halt(TestEnd);
 end.

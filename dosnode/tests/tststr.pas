@@ -31,12 +31,13 @@ const
   FuzzRounds = 200000;
 {$ENDIF}
 
-  PlannedTests = 52;
+  PlannedTests = 74;
   Seed0 = 20260904;
 
 var
   S, T: TStr;
   N: Word;
+  V: Int64;
   Buf: array[0..63] of Byte;
   Pas: string;
   Rnd: LongInt;
@@ -87,11 +88,42 @@ begin
   end;
 end;
 
-procedure CheckBad(const Name: string; const V: TStr);
+procedure CheckBad(const Name: string; const Vw: TStr);
 var
   Got: Word;
 begin
-  TestOk(Name, not StrCharLen(V, Got));
+  TestOk(Name, not StrCharLen(Vw, Got));
+end;
+
+{ Число разбирается и совпадает с ожидаемым. }
+procedure CheckNum(const Name: string; const Src: string; Want: Int64);
+var
+  Got: Int64;
+  Vw: TStr;
+  Tmp: string;
+begin
+  Tmp := Src;
+  Vw := StrView(Tmp);
+  if not StrToInt64(Vw, Got) then
+  begin
+    TestOk(Name, False);
+    TestDiag('  отвергнуто, а ожидалось принятие');
+    Exit;
+  end;
+  TestOk(Name, Got = Want);
+  if Got <> Want then
+    TestDiag('  посчитано не то');
+end;
+
+procedure CheckNotNum(const Name: string; const Src: string);
+var
+  Got: Int64;
+  Vw: TStr;
+  Tmp: string;
+begin
+  Tmp := Src;
+  Vw := StrView(Tmp);
+  TestOk(Name, not StrToInt64(Vw, Got));
 end;
 
 begin
@@ -226,6 +258,46 @@ begin
   { Испорченное в конце длинной корректной строки не должно теряться. }
   CheckBad('порча в хвосте корректной строки',
            Bytes([$61, $62, $63, $D1, $8F, $E0, $80, $80]));
+
+  { ================================================================
+    Целое из строки
+
+    Разбор строгий: снисходительность тут дорого стоит. «12abc»,
+    разобранное как 12, даёт правдоподобное неверное число вместо отказа,
+    а число приходит по линии и решает, например, сколько постов автор
+    написал за час.
+    ================================================================ }
+
+  CheckNum('ноль', '0', 0);
+  CheckNum('однозначное', '7', 7);
+  CheckNum('многозначное', '1234567890', 1234567890);
+  CheckNum('явный плюс', '+42', 42);
+  CheckNum('отрицательное', '-42', -42);
+  CheckNum('ведущие нули', '007', 7);
+  { Миллисекунды эпохи не помещаются в LongInt — ради них и Int64. }
+  CheckNum('миллисекунды эпохи', '1756684800000', 1756684800000);
+  CheckNum('предел Int64 сверху', '9223372036854775807',
+           9223372036854775807);
+  { Low(Int64), а не литерал: литерал -9223372036854775808 компилятор
+    читает как отрицание числа 9223372036854775808, которое в Int64 не
+    помещается. Та же асимметрия, из-за которой накопление в StrToInt64
+    идёт в отрицательном диапазоне. }
+  CheckNum('предел Int64 снизу', '-9223372036854775808', Low(Int64));
+
+  CheckNotNum('пустая строка', '');
+  CheckNotNum('один знак минус', '-');
+  CheckNotNum('один знак плюс', '+');
+  CheckNotNum('буквы', 'abc');
+  CheckNotNum('хвост после цифр', '12abc');
+  CheckNotNum('пробел в начале', ' 12');
+  CheckNotNum('пробел в конце', '12 ');
+  CheckNotNum('точка', '1.5');
+  CheckNotNum('знак посередине', '1-2');
+  CheckNotNum('два знака', '--1');
+  { Переполнение проверяется до умножения: после него проверять нечего. }
+  CheckNotNum('на единицу больше предела', '9223372036854775808');
+  CheckNotNum('на единицу меньше предела', '-9223372036854775809');
+  CheckNotNum('заведомо больше предела', '99999999999999999999');
 
   { ================================================================
     Случайные байты

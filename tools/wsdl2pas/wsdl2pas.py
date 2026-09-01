@@ -35,6 +35,7 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 WSDL_PATH = ROOT / "contracts" / "soap" / "decider-v1.wsdl"
 PAS_OUT = ROOT / "dosnode" / "src" / "generated" / "dcdtypes.pas"
+SRV_OUT = ROOT / "dosnode" / "src" / "generated" / "dcdsrv.pas"
 JSON_OUT = ROOT / "contracts" / "generated" / "operations.json"
 
 XS = "http://www.w3.org/2001/XMLSchema"
@@ -259,6 +260,225 @@ def emit_pascal(model: Model) -> str:
     return "\n".join(o) + "\n"
 
 
+SRV_HEADER = """{ СГЕНЕРИРОВАНО. Не править руками.
+
+  Источник:      contracts/soap/decider-v1.wsdl
+  Генератор:     tools/wsdl2pas/wsdl2pas.py
+  Перегенерация: ./sonder codegen
+
+  Серверная сторона: разбор полей команды и запись решения. Java —
+  клиент SOAP, NODE-7 — сервер (ADR-0011), поэтому здесь именно разбор
+  запроса и запись ответа, а не наоборот.
+
+  Отдельный модуль, а не добавка к DcdTypes: типы нужны всем, кто трогает
+  контракт, а разбор конверта — только ноде. Тянуть TcSoap туда, где
+  нужен один TStr, незачем.
+
+  Разбор идёт по паре «группа, поле», а не по дереву: каждая операция в
+  контракте объявляет группы из скалярных полей, глубже не заходит ни
+  одна (см. TcSoap). Форма этих процедур повторяет ту, что была написана
+  руками в tstsoap до появления генератора.
+
+  С НЕРАЗОБРАННЫМ ЗНАЧЕНИЕМ НЕ ДЕЛАЕТСЯ НИЧЕГО МОЛЧА. Поле, которого нет
+  в контракте, и поле, значение которого не разбирается, различаются и
+  возвращаются вызывающему. Оставить в записи ноль и продолжить значило
+  бы решить по неполным данным — тот самый R5.
+}"""
+
+
+def enum_parsers(model: Model) -> list[str]:
+    """Разбор перечислений по литералам, а не поиском в таблице имён.
+
+    Таблица RoleNames хранит PChar, и сравнение с TStr потребовало бы ещё
+    одного примитива в TcStr. Литералы генерируются, читаются и
+    проверяются одинаково хорошо, а лишней сущности не заводят.
+    """
+    o: list[str] = []
+    for name, values in model.enums.items():
+        pas = pas_type_name(name)
+        o.append(f"function Parse{name}(const S: TStr; var V: {pas}): Boolean;")
+        o.append("begin")
+        o.append(f"  Parse{name} := True;")
+        for v in values:
+            o.append(f"  if StrEqPas(S, '{v}') then")
+            o.append(f"  begin V := {name}_{v}; Exit; end;")
+        o.append(f"  Parse{name} := False;")
+        o.append("end;")
+        o.append("")
+    return o
+
+
+def assign_scalar(target: str, ftype: str, model: Model, ind: str) -> list[str]:
+    """Присваивание одного скалярного поля из TStr."""
+    if ftype == "TStr":
+        return [f"{ind}{target} := Value;"]
+    if ftype == "Boolean":
+        return [
+            f"{ind}if StrEqPas(Value, 'true') then {target} := True",
+            f"{ind}else if StrEqPas(Value, 'false') then {target} := False",
+            f"{ind}else Res := foBadValue;",
+        ]
+    if ftype in ("LongInt", "Integer"):
+        lo, hi = ("-2147483647", "2147483647") if ftype == "LongInt" \
+                 else ("-32767", "32767")
+        return [
+            f"{ind}if StrToInt64(Value, Tmp) and (Tmp >= {lo})",
+            f"{ind}   and (Tmp <= {hi}) then",
+            f"{ind}  {target} := {ftype}(Tmp)",
+            f"{ind}else",
+            f"{ind}  Res := foBadValue;",
+        ]
+    if ftype == "Int64":
+        return [
+            f"{ind}if StrToInt64(Value, Tmp) then",
+            f"{ind}  {target} := Tmp",
+            f"{ind}else",
+            f"{ind}  Res := foBadValue;",
+        ]
+    enum_name = ftype[1:] if ftype.startswith("T") else ftype
+    if enum_name in model.enums:
+        return [
+            f"{ind}if not Parse{enum_name}(Value, {target}) then",
+            f"{ind}  Res := foBadValue;",
+        ]
+    return [f"{ind}Res := foBadValue;   {{ тип {ftype} генератор не умеет }}"]
+
+
+def decision_writer(model: Model) -> list[str]:
+    by_name = dict(model.records)
+    dec = by_name.get("TDecision", [])
+    ev = by_name.get("TDomainEvent", [])
+
+    def one(indent: str, name: str, acc: str, ftype: str) -> list[str]:
+        if ftype == "Boolean":
+            return [f"{indent}SoapElementBool(W, '{name}', {acc});"]
+        if ftype == "TStr":
+            return [f"{indent}SoapElement(W, '{name}', {acc});"]
+        if ftype in ("LongInt", "Integer", "Int64"):
+            return [f"{indent}SoapElementInt(W, '{name}', {acc});"]
+        return []
+
+    o: list[str] = []
+    o.append("procedure WriteDecision(var W: TSoapWriter;")
+    o.append("                        const ResponseName: string;")
+    o.append("                        const D: TDecision);")
+    o.append("var")
+    o.append("  Node: PDomainEventNode;")
+    o.append("begin")
+    o.append("  SoapOpen(W, ResponseName);")
+    for f in dec:
+        if not f["repeated"]:
+            o.extend(one("  ", f["xsd_name"], f"D.{f['name']}", f["type"]))
+    for f in dec:
+        if not f["repeated"]:
+            continue
+        o.append(f"  Node := D.{f['name']};")
+        o.append("  while Node <> nil do")
+        o.append("  begin")
+        o.append(f"    SoapOpen(W, '{f['xsd_name']}');")
+        for g in ev:
+            if g["repeated"]:
+                continue
+            o.extend(one("    ", g["xsd_name"],
+                         f"Node^.Value.{g['name']}", g["type"]))
+        o.append(f"    SoapClose(W, '{f['xsd_name']}');")
+        o.append("    Node := Node^.Next;")
+        o.append("  end;")
+    o.append("  SoapClose(W, ResponseName);")
+    o.append("end;")
+    o.append("")
+    return o
+
+
+def emit_server(model: Model) -> str:
+    by_name = dict(model.records)
+    requests = [n for n, _ in model.records if n.endswith("Request")]
+
+    o: list[str] = [
+        SRV_HEADER, "", "unit DcdSrv;", "", "{$MODE TP}", "{$R-}", "",
+        "interface", "", "uses", "  TcStr, TcSoap, DcdTypes;", "", "type",
+        "  { Что стало с полем, пришедшим в конверте. }",
+        "  TFillOutcome = (",
+        "    foOk,        { поле известно и разобрано }",
+        "    foUnknown,   { такого поля нет в контракте }",
+        "    foBadValue   { поле есть, а значение не разбирается }",
+        "  );", "",
+    ]
+
+    for req in requests:
+        op = req[1:-7]
+        o.append(f"function Fill{op}(var Req: {req};")
+        o.append(f"                 const Group, Field, Value: TStr): TFillOutcome;")
+    o.append("")
+    o.append("{ Запись решения. Одна на все операции: решение по контракту")
+    o.append("  всегда TDecision, различается только имя элемента ответа. }")
+    o.append("procedure WriteDecision(var W: TSoapWriter;")
+    o.append("                        const ResponseName: string;")
+    o.append("                        const D: TDecision);")
+    o.append("")
+    o.append("implementation")
+    o.append("")
+
+    o.extend(enum_parsers(model))
+
+    for req in requests:
+        op = req[1:-7]
+        fields = by_name.get(req, [])
+        o.append(f"function Fill{op}(var Req: {req};")
+        o.append(f"                 const Group, Field, Value: TStr): TFillOutcome;")
+        o.append("var")
+        o.append("  Res: TFillOutcome;")
+        o.append("  Tmp: Int64;")
+        o.append("begin")
+        o.append("  Res := foOk;")
+
+        first = True
+        for f in fields:
+            ftype = f["type"]
+            group = by_name.get(ftype)
+            kw = "if" if first else "else if"
+            if group is not None and not f["repeated"]:
+                o.append(f"  {kw} StrEqPas(Group, '{f['xsd_name']}') then")
+                o.append("  begin")
+                inner_first = True
+                for g in group:
+                    if g["repeated"]:
+                        continue
+                    ikw = "if" if inner_first else "else if"
+                    o.append(f"    {ikw} StrEqPas(Field, '{g['xsd_name']}') then")
+                    o.append("    begin")
+                    o.extend(assign_scalar(f"Req.{f['name']}.{g['name']}",
+                                           g["type"], model, "      "))
+                    o.append("    end")
+                    inner_first = False
+                if inner_first:
+                    o.append("    Res := foUnknown;")
+                else:
+                    o.append("    else")
+                    o.append("      Res := foUnknown;")
+                o.append("  end")
+            else:
+                o.append(f"  {kw} (Group.Len = 0) and "
+                         f"StrEqPas(Field, '{f['xsd_name']}') then")
+                o.append("  begin")
+                o.extend(assign_scalar(f"Req.{f['name']}", ftype, model, "    "))
+                o.append("  end")
+            first = False
+
+        if first:
+            o.append("  Res := foUnknown;")
+        else:
+            o.append("  else")
+            o.append("    Res := foUnknown;")
+        o.append(f"  Fill{op} := Res;")
+        o.append("end;")
+        o.append("")
+
+    o.extend(decision_writer(model))
+    o.append("end.")
+    return "\n".join(o) + "\n"
+
+
 def topo_sort(model: Model) -> list[str]:
     """Записи объявляются после тех, на которые ссылаются."""
     by_name = dict(model.records)
@@ -304,6 +524,12 @@ def main() -> int:
         print(f"  {PAS_OUT.relative_to(ROOT)}  изменён")
     else:
         print(f"  {PAS_OUT.relative_to(ROOT)}  без изменений")
+
+    if write(SRV_OUT, emit_server(model)):
+        changed += 1
+        print(f"  {SRV_OUT.relative_to(ROOT)}  изменён")
+    else:
+        print(f"  {SRV_OUT.relative_to(ROOT)}  без изменений")
 
     manifest = {
         "_comment": (

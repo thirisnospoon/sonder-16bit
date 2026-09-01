@@ -78,6 +78,17 @@ function StrHead(const S: TStr): string;
   Java-сторона считает невозможными. }
 function StrCharLen(const S: TStr; var N: Word): Boolean;
 
+{ Целое из строки, пришедшей по линии.
+
+  Строгий разбор: необязательный знак, дальше только цифры, и хотя бы
+  одна. Ни пробелов, ни хвоста, ни пустой строки. Снисходительность тут
+  дорого стоит — «12abc», разобранное как 12, даёт правдоподобное
+  неверное число, а не отказ.
+
+  Переполнение проверяется ДО умножения, а не после: после него проверять
+  уже нечего. False означает, что V не определено. }
+function StrToInt64(const S: TStr; var V: Int64): Boolean;
+
 implementation
 
 function StrNil: TStr;
@@ -289,6 +300,71 @@ begin
 
   N := Cnt;
   StrCharLen := True;
+end;
+
+function StrToInt64(const S: TStr; var V: Int64): Boolean;
+const
+  { Накопление идёт В ОТРИЦАТЕЛЬНОМ диапазоне, а не в положительном.
+
+    Причина в асимметрии дополнительного кода: минимум Int64 по модулю
+    на единицу больше максимума. Накопив -9223372036854775808 как
+    положительное число, его негде подержать — переполнение происходит
+    ДО того, как дело дойдёт до смены знака. Первая редакция так и
+    делала и падала с ошибкой 215 ровно на нижней границе. }
+  NegLimit = Int64(-922337203685477580);
+  LastNegDigit = 8;
+var
+  I: Word;
+  Neg: Boolean;
+  Acc: Int64;
+  D: Byte;
+  C: Char;
+begin
+  StrToInt64 := False;
+  V := 0;
+
+  if (S.Len = 0) or (S.Ptr = nil) then
+    Exit;
+
+  I := 0;
+  Neg := False;
+  if (S.Ptr[0] = '-') or (S.Ptr[0] = '+') then
+  begin
+    Neg := S.Ptr[0] = '-';
+    I := 1;
+    if I >= S.Len then
+      Exit;   { один знак без цифр }
+  end;
+
+  Acc := 0;
+  while I < S.Len do
+  begin
+    C := S.Ptr[I];
+    if (C < '0') or (C > '9') then
+      Exit;
+    D := Ord(C) - Ord('0');
+
+    { Проверка до умножения. После него переполнение уже произошло, и
+      судить о нём по знаку результата — гадание. }
+    if Acc < NegLimit then
+      Exit;
+    if (Acc = NegLimit) and (D > LastNegDigit) then
+      Exit;
+
+    Acc := Acc * 10 - D;
+    Inc(I);
+  end;
+
+  if Neg then
+    V := Acc
+  else
+  begin
+    { Положительного двойника у минимума нет. }
+    if Acc = Low(Int64) then
+      Exit;
+    V := -Acc;
+  end;
+  StrToInt64 := True;
 end;
 
 end.
