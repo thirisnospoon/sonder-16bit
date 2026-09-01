@@ -86,6 +86,47 @@
     </dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <!--
+        Клиент SOAP порождается из того же WSDL, из которого wsdl2pas
+        порождает серверную сторону. Contract-first в обе стороны — это и
+        есть главная причина, по которой в проекте вообще есть SOAP: из
+        WSDL можно породить клиента для языка 1970 года.
+
+        РЕЗУЛЬТАТ НЕ КОММИТИТСЯ, в отличие от сгенерированного Pascal, и
+        это не непоследовательность. Pascal лежит в репозитории, чтобы его
+        было видно на ревью, а расхождение с контрактом ловится проверкой
+        дрейфа. Здесь проверять нечего: код порождается заново при каждой
+        сборке из того же WSDL, и разойтись ему не с чем и негде.
+      -->
+      <plugin>
+        <groupId>org.apache.cxf</groupId>
+        <artifactId>cxf-codegen-plugin</artifactId>
+        <version>${cxf.version}</version>
+        <executions>
+          <execution>
+            <id>decider-client</id>
+            <phase>generate-sources</phase>
+            <goals><goal>wsdl2java</goal></goals>
+            <configuration>
+              <sourceRoot>${project.build.directory}/generated-sources/cxf</sourceRoot>
+              <wsdlOptions>
+                <wsdlOption>
+                  <wsdl>${project.basedir}/../contracts/soap/decider-v1.wsdl</wsdl>
+                  <extraargs>
+                    <extraarg>-p</extraarg>
+                    <extraarg>urn:sonder:decider:v1=sonder.contract.decider</extraarg>
+                  </extraargs>
+                </wsdlOption>
+              </wsdlOptions>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
   <profiles>
     <!--
       Интеграционные тесты отдельным профилем, а не в каждой сборке.

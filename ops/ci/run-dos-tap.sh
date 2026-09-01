@@ -20,6 +20,7 @@ PROG_ARGS=""
 TIMEOUT=300
 NAME=""
 KEEP=0
+DATA=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,6 +30,10 @@ while [ $# -gt 0 ]; do
     --timeout) TIMEOUT="$2"; shift 2 ;;
     --name)    NAME="$2"; shift 2 ;;
     --keep)    KEEP=1; shift ;;
+    # Файл, который нужен программе рядом с ней: «путь:ИМЯ.РАС».
+    # Имя обязано быть 8.3 — DOS другого не понимает. Отсутствующий
+    # источник не ошибка: не всякому тесту нужны данные.
+    --data)    DATA="${DATA} $2"; shift 2 ;;
     *) echo "неизвестный аргумент: $1" >&2; exit 64 ;;
   esac
 done
@@ -47,6 +52,13 @@ trap cleanup EXIT
 # DOS требует имена 8.3, и монтируется именно каталог, а не файл.
 DOS_EXE="$(basename "$EXE" | tr '[:lower:]' '[:upper:]')"
 cp "$EXE" "$WORK/$DOS_EXE"
+
+for spec in $DATA; do
+  src="${spec%%:*}"
+  dst="${spec##*:}"
+  [ -f "$src" ] || continue
+  cp "$src" "$WORK/$dst"
+done
 
 cat > "$WORK/dosbox.conf" <<EOF
 [sdl]

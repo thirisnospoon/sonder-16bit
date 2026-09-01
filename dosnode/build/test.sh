@@ -14,6 +14,19 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TESTS="$ROOT/dosnode/tests"
 
+# Эталонные конверты. Их записал маршалер JAXB на настоящих
+# сгенерированных типах, и тест ядра разбирает ИМЕННО эти байты: «обе
+# стороны порождены из одного WSDL» и «понимают друг друга» — разные
+# утверждения. Под DOS имя обязано быть 8.3.
+GOLD_SRC="$ROOT/contracts/generated/envelopes/create-post.xml"
+
+place_gold() {
+  local dir="$1" name="$2"
+  [ -f "$GOLD_SRC" ] || return 0
+  mkdir -p "$dir"
+  cp "$GOLD_SRC" "$dir/$name"
+}
+
 rc=0
 
 run_native() {
@@ -28,6 +41,7 @@ run_native() {
       failed=1; continue
     fi
     echo "--- $name ---"
+    place_gold "$(dirname "$bin")" create-post.xml
     # Отчёт пишется в рабочий каталог, поэтому запускаем из него.
     ( cd "$(dirname "$bin")" && "./$name" ) | sed 's/^/  /'
     local st=${PIPESTATUS[0]}
@@ -56,6 +70,7 @@ run_msdos() {
     # Вердикт выносится по TAP-файлу, а не по коду возврата эмулятора (R3).
     bash "$ROOT/ops/ci/run-dos-tap.sh" \
          --exe "$bin" --tap "${upper}.TAP" --timeout 300 --name "$name" \
+         --data "$GOLD_SRC:CRPOST.XML" \
       | sed 's/^/  /'
     [ "${PIPESTATUS[0]}" -ne 0 ] && failed=1
   done
