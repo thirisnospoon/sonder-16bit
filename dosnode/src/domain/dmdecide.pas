@@ -51,6 +51,9 @@ function DecideCreatePost(var A: TArena; const Req: TCreatePostRequest;
 function DecideDeletePost(var A: TArena; const Req: TDeletePostRequest;
                           var D: TDecision): TResult;
 
+function DecideCreateComment(var A: TArena; const Req: TCreateCommentRequest;
+                             var D: TDecision): TResult;
+
 function DecideFollowUser(var A: TArena; const Req: TFollowUserRequest;
                           var D: TDecision): TResult;
 
@@ -372,6 +375,95 @@ end;
   событий. Это не снисходительность, а требование к повторам по линии,
   которая может доставить команду дважды.
   ------------------------------------------------------------------ }
+
+function DecideCreateComment(var A: TArena; const Req: TCreateCommentRequest;
+                             var D: TDecision): TResult;
+var
+  Ev: PDomainEventNode;
+  R: TResult;
+begin
+  ClearDecision(D);
+  DecideCreateComment := Ok;
+
+  { Состояние поста объявлено операцией и потому обязано прийти: без него
+    ядро не может знать, что пост удалён, и приняло бы комментарий к
+    несуществующему (R5). }
+  if (not ActorComplete(Req.actor)) or (not PostComplete(Req.post)) then
+  begin
+    Reject(D, ERR_INSUFFICIENT_CONTEXT);
+    Exit;
+  end;
+
+  if (not IdWellFormed(Req.command.commentId)) or
+     (not IdWellFormed(Req.command.postId)) then
+  begin
+    Reject(D, ERR_INSUFFICIENT_CONTEXT);
+    Exit;
+  end;
+
+  if not Req.post.exists then
+  begin
+    Reject(D, ERR_POST_NOT_FOUND);
+    Exit;
+  end;
+
+  { Права раньше формы: заблокированному незачем сообщать, что его текст
+    к тому же слишком длинный. }
+  if IsBanned(Req.actor.status) or IsGone(Req.actor.status) then
+  begin
+    Reject(D, ERR_ACTOR_BANNED);
+    Exit;
+  end;
+
+  case TextCheck(Req.command.body, LIM_COMMENT_BODY_MAX_LEN) of
+    tvBadEncoding:
+      begin
+        Reject(D, ERR_TEXT_ENCODING_INVALID);
+        Exit;
+      end;
+    tvEmpty:
+      begin
+        Reject(D, ERR_COMMENT_BODY_EMPTY);
+        Exit;
+      end;
+    tvTooLong:
+      begin
+        Reject(D, ERR_COMMENT_BODY_TOO_LONG);
+        Exit;
+      end;
+  end;
+
+  { Состояние объекта после формы: удалённый пост — это конфликт, а не
+    ошибка формы, и код у него другой. }
+  if Req.post.status = PostStatus_DELETED then
+  begin
+    Reject(D, ERR_POST_NOT_FOUND);
+    Exit;
+  end;
+
+  if Req.actor.commentsLastHour >= LIM_COMMENTS_PER_HOUR then
+  begin
+    Reject(D, ERR_COMMENT_RATE_EXCEEDED);
+    Exit;
+  end;
+
+  AcceptEmpty(D);
+  R := EmitEvent(A, D, 'comment.created', Req.command.commentId, Ev);
+  if not R.Ok then
+  begin
+    DecideCreateComment := R;
+    Exit;
+  end;
+  R := EmitField(A, Ev, 'postId', Req.command.postId);
+  if not R.Ok then
+  begin
+    DecideCreateComment := R;
+    Exit;
+  end;
+  R := EmitField(A, Ev, 'authorId', Req.actor.userId);
+  if not R.Ok then
+    DecideCreateComment := R;
+end;
 
 function DecideDeletePost(var A: TArena; const Req: TDeletePostRequest;
                           var D: TDecision): TResult;

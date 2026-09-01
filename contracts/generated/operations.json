@@ -25,6 +25,21 @@
       ]
     },
     {
+      "operation": "CreateComment",
+      "soapAction": "urn:sonder:decider:v1:CreateComment",
+      "request": "CreateCommentRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        },
+        {
+          "element": "post",
+          "type": "TPostContext"
+        }
+      ]
+    },
+    {
       "operation": "DeletePost",
       "soapAction": "urn:sonder:decider:v1:DeletePost",
       "request": "DeletePostRequest",

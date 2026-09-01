@@ -72,7 +72,7 @@ def validate_errors() -> dict:
         )
         check(
             f"errors.yaml: у кода {code} не указано, кто его решает",
-            entry.get("decided_by") in ("core", "shell"),
+            entry.get("decided_by") in ("core", "core-runtime", "shell"),
         )
         check(
             f"errors.yaml: код {code} без описания",

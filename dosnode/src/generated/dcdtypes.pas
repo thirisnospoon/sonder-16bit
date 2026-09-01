@@ -97,6 +97,12 @@ type
     body: TStr;
   end;
 
+  TCreateCommentCommand = record
+    commentId: TStr;
+    postId: TStr;
+    body: TStr;
+  end;
+
   TDeletePostCommand = record
     postId: TStr;
   end;
@@ -120,6 +126,13 @@ type
     meta: TCommandMeta;
     command: TCreatePostCommand;
     actor: TActorContext;
+  end;
+
+  TCreateCommentRequest = record
+    meta: TCommandMeta;
+    command: TCreateCommentCommand;
+    actor: TActorContext;
+    post: TPostContext;
   end;
 
   TDeletePostRequest = record
@@ -171,9 +184,10 @@ const
   PostStatusNames: array[TPostStatus] of PChar = ('VISIBLE', 'DELETED');
 
   { Операции контракта. }
-  OperationCount = 6;
+  OperationCount = 7;
   Op_RegisterUser = 'RegisterUser';
   Op_CreatePost = 'CreatePost';
+  Op_CreateComment = 'CreateComment';
   Op_DeletePost = 'DeletePost';
   Op_FollowUser = 'FollowUser';
   Op_BanUser = 'BanUser';

@@ -66,3 +66,32 @@ const
     обрезаться при присваивании в TErrCode. }
   ERR_MAX_CODE_LEN = 22;
 
+  { Коды, которые возвращает функция решения. По каждому из них
+    golden-набор обязан иметь случай: код, который ничто не
+    порождает, существует только на бумаге. }
+  ERR_DECISION_CODE_COUNT = 22;
+  ErrDecisionCodes: array[1..22] of PChar = (
+    'NICK_FORMAT_INVALID',
+    'POST_BODY_EMPTY',
+    'POST_BODY_TOO_LONG',
+    'COMMENT_BODY_EMPTY',
+    'COMMENT_BODY_TOO_LONG',
+    'BAN_REASON_EMPTY',
+    'BAN_REASON_TOO_LONG',
+    'DISPLAY_NAME_INVALID',
+    'TEXT_ENCODING_INVALID',
+    'ACTOR_BANNED',
+    'NOT_OWNER',
+    'ROLE_INSUFFICIENT',
+    'CANNOT_MODERATE_PEER',
+    'USER_NOT_FOUND',
+    'POST_NOT_FOUND',
+    'NICK_TAKEN',
+    'SELF_FOLLOW',
+    'ALREADY_FOLLOWING',
+    'ALREADY_BANNED',
+    'POST_RATE_EXCEEDED',
+    'COMMENT_RATE_EXCEEDED',
+    'INSUFFICIENT_CONTEXT'
+  );
+

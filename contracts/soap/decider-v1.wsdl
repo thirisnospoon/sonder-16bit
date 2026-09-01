@@ -213,6 +213,30 @@
         </xs:complexType>
       </xs:element>
 
+      <!-- Комментарий. Границы и коды отказа для него объявлены в
+           limits.yaml и errors.yaml с самого начала, а операции не было:
+           коды существовали только на бумаге. -->
+      <xs:complexType name="CreateCommentCommand">
+        <xs:sequence>
+          <xs:element name="commentId" type="tns:Id"/>
+          <xs:element name="postId"    type="tns:Id"/>
+          <xs:element name="body"      type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="CreateCommentRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:CreateCommentCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+            <!-- Состояние поста нужно: комментировать удалённый пост
+                 нельзя, а узнать об этом ядро может только из запроса. -->
+            <xs:element name="post"    type="tns:PostContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
       <xs:complexType name="DeletePostCommand">
         <xs:sequence>
           <xs:element name="postId" type="tns:Id"/>
@@ -297,6 +321,7 @@
 
   <wsdl:message name="RegisterUserIn"><wsdl:part name="body" element="tns:RegisterUserRequest"/></wsdl:message>
   <wsdl:message name="CreatePostIn">  <wsdl:part name="body" element="tns:CreatePostRequest"/></wsdl:message>
+  <wsdl:message name="CreateCommentIn"><wsdl:part name="body" element="tns:CreateCommentRequest"/></wsdl:message>
   <wsdl:message name="DeletePostIn">  <wsdl:part name="body" element="tns:DeletePostRequest"/></wsdl:message>
   <wsdl:message name="FollowUserIn">  <wsdl:part name="body" element="tns:FollowUserRequest"/></wsdl:message>
   <wsdl:message name="BanUserIn">     <wsdl:part name="body" element="tns:BanUserRequest"/></wsdl:message>
@@ -317,6 +342,11 @@
 
     <wsdl:operation name="CreatePost">
       <wsdl:input  message="tns:CreatePostIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="CreateComment">
+      <wsdl:input  message="tns:CreateCommentIn"/>
       <wsdl:output message="tns:DecisionOut"/>
     </wsdl:operation>
 
@@ -358,6 +388,12 @@
 
     <wsdl:operation name="CreatePost">
       <soap:operation soapAction="urn:sonder:decider:v1:CreatePost"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="CreateComment">
+      <soap:operation soapAction="urn:sonder:decider:v1:CreateComment"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input>
       <wsdl:output><soap:body use="literal"/></wsdl:output>
     </wsdl:operation>

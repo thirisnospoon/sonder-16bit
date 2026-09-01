@@ -24,7 +24,7 @@ program TstDomn;
 {$R-}
 
 uses
-  TcResult, TcStr, TcArena, TcTest, DcdTypes, DmRules, DmDecide;
+  TcResult, TcStr, TcArena, TcTest, DcdTypes, DmRules, DmDecide, Strings;
 
 {$I errcodes.inc}
 {$I dmlimits.inc}
@@ -38,7 +38,7 @@ const
   TapFile    = 'tstdomn.tap';
 {$ENDIF}
 
-  PlannedTests = 64;
+  PlannedTests = 76;
   Seed0 = 20260903;
 
 var
@@ -50,7 +50,7 @@ var
   { Буферы под строки: TStr смотрит внутрь них, поэтому они обязаны жить
     дольше запросов, которые на них ссылаются. Здесь это глобальные
     переменные — самый простой способ обеспечить нужное время жизни. }
-  SActor, STarget, SPost, SNick, SName, SBody, SReason: string;
+  SActor, STarget, SPost, SNick, SName, SBody, SReason, SComment: string;
   SProbe: string;   { для проб в тестах правил, чтобы не портить заготовки }
 
   { Буфер под длинные строки. Паскалевская строка не длиннее 255 байт, а
@@ -150,6 +150,7 @@ begin
   SName   := 'Андрей';
   SBody   := 'Первый пост в этой странной системе';
   SReason := 'нарушение правил';
+  SComment := 'c-2001';
 end;
 
 procedure BaseActor(var Act: TActorContext);
@@ -211,6 +212,23 @@ begin
   Req.follow.alreadyFollowing := False;
 end;
 
+procedure BaseComment(var Req: TCreateCommentRequest);
+begin
+  ResetStrings;
+  FillChar(Req, SizeOf(Req), 0);
+  Req.meta.traceId := StrView(SActor);
+  Req.meta.commandId := StrView(SPost);
+  Req.command.commentId := StrView(SComment);
+  Req.command.postId := StrView(SPost);
+  Req.command.body := StrView(SBody);
+  BaseActor(Req.actor);
+  Req.post.exists := True;
+  Req.post.postId := StrView(SPost);
+  Req.post.authorId := StrView(STarget);
+  Req.post.status := PostStatus_VISIBLE;
+  Req.post.version := 1;
+end;
+
 procedure BaseBan(var Req: TBanUserRequest);
 begin
   ResetStrings;
@@ -228,9 +246,31 @@ end;
 
 { ------------------------------------------------------------------ }
 
+{ Какие коды решения golden-набор успел породить. Индексы совпадают с
+  ErrDecisionCodes из errcodes.inc. }
+var
+  Produced: array[1..ERR_DECISION_CODE_COUNT] of Boolean;
+
+procedure NoteProduced(const C: string);
+var
+  K: Integer;
+begin
+  for K := 1 to ERR_DECISION_CODE_COUNT do
+    { StrPas, а не StrComp с указателем на C[1]: паскалевская строка не
+      заканчивается нулём, и StrComp читал бы за её конец. Первая
+      редакция так и делала — и половина кодов ложно числилась
+      непорождённой. }
+    if StrPas(ErrDecisionCodes[K]) = C then
+    begin
+      Produced[K] := True;
+      Exit;
+    end;
+end;
+
 procedure CheckRejected(const Name: string; const Dec: TDecision;
                         const WantCode: string);
 begin
+  NoteProduced(Code(Dec));
   TestOk(Name, (not Dec.accepted) and (Code(Dec) = WantCode));
   if Dec.accepted then
     TestDiag('  ожидался отказ ' + WantCode + ', получено принятие')
@@ -250,6 +290,7 @@ end;
 
 var
   CP: TCreatePostRequest;
+  CC: TCreateCommentRequest;
   RU: TRegisterUserRequest;
   DP: TDeletePostRequest;
   FU: TFollowUserRequest;
@@ -259,6 +300,7 @@ var
   Nick: TStr;
 
 begin
+  FillChar(Produced, SizeOf(Produced), 0);
   TestBegin(TapFile, PlannedTests);
   TestDiag('доменное ядро');
 {$IFDEF CPU16}
@@ -618,6 +660,78 @@ begin
   TestTrue('среди случайных были и принятия, и отказы',
            (N > 0) and (N < FuzzRounds));
 
+  { ================================================================
+    CreateComment
+
+    Границы и коды для комментария были объявлены в контракте с самого
+    начала, а операции не было: три кода существовали только на бумаге.
+    Обнаружилось это не глазами — механической сверкой ниже.
+    ================================================================ }
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  R := DecideCreateComment(Arena, CC, D);
+  CheckAccepted('корректный комментарий принимается', D);
+  TestEqInt('комментарий порождает одно событие', EventCount(D), 1);
+  TestEqStr('тип события комментария', FirstEventType(D), 'comment.created');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.actor.commentsLastHour := -1;
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('неполное состояние автора отвергается',
+                D, 'INSUFFICIENT_CONTEXT');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.post.exists := False;
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('комментарий к несуществующему посту отвергается',
+                D, 'POST_NOT_FOUND');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.actor.status := UserStatus_BANNED;
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('заблокированный не комментирует', D, 'ACTOR_BANNED');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  SBody := '   ';
+  CC.command.body := StrView(SBody);
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('пустой комментарий отвергается', D, 'COMMENT_BODY_EMPTY');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.command.body := Repeated('a', LIM_COMMENT_BODY_MAX_LEN + 1);
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('слишком длинный комментарий отвергается',
+                D, 'COMMENT_BODY_TOO_LONG');
+
+  { Предел в символах, а не в байтах — как и у поста. }
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.command.body := Repeated('я', LIM_COMMENT_BODY_MAX_LEN);
+  R := DecideCreateComment(Arena, CC, D);
+  CheckAccepted('пятьсот кириллических символов — законный комментарий', D);
+
+  { Удалённый пост — это конфликт состояния, а не ошибка формы, поэтому
+    проверяется после неё. }
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.post.status := PostStatus_DELETED;
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('комментарий к удалённому посту отвергается',
+                D, 'POST_NOT_FOUND');
+
+  ArenaReset(Arena);
+  BaseComment(CC);
+  CC.actor.commentsLastHour := LIM_COMMENTS_PER_HOUR;
+  R := DecideCreateComment(Arena, CC, D);
+  CheckRejected('превышение частоты комментариев отвергается',
+                D, 'COMMENT_RATE_EXCEEDED');
+
   { Инварианты подписки: самоподписка не проходит никогда. }
   Rnd := Seed0 + 1;
   Bad := 0;
@@ -666,5 +780,29 @@ begin
   TestTrue('арена решений не переполнилась', Arena.HighMark < Arena.Capacity);
 
   ArenaDestroy(Arena);
+  { ================================================================
+    Полнота golden-набора
+
+    Правило из шапки этого файла — «на каждый код ядра здесь обязан быть
+    случай» — до сих пор было пожеланием: соблюдать его приходилось
+    глазами, и три кода про комментарии тихо выпали. Теперь оно
+    проверяется механически по таблице из контракта.
+
+    Инфраструктурные коды ядра (decided_by: core-runtime) в таблицу не
+    входят: их порождает рантайм, а не решение, и требовать для них
+    golden-случая было бы неверно.
+    ================================================================ }
+
+  Bad := 0;
+  for I := 1 to ERR_DECISION_CODE_COUNT do
+    if not Produced[I] then
+    begin
+      Inc(Bad);
+      TestDiag('  не порождён ни одним случаем: ' +
+               StrPas(ErrDecisionCodes[I]));
+    end;
+  TestEqInt('каждый код решения порождён golden-набором', Bad, 0);
+  TestDiagInt('кодов решения в контракте', ERR_DECISION_CODE_COUNT);
+
   Halt(TestEnd);
 end.

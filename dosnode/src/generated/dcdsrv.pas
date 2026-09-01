@@ -45,6 +45,8 @@ function FillRegisterUser(var Req: TRegisterUserRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
 function FillCreatePost(var Req: TCreatePostRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
+function FillCreateComment(var Req: TCreateCommentRequest;
+                 const Group, Field, Value: TStr): TFillOutcome;
 function FillDeletePost(var Req: TDeletePostRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
 function FillFollowUser(var Req: TFollowUserRequest;
@@ -234,6 +236,122 @@ begin
   else
     Res := foUnknown;
   FillCreatePost := Res;
+end;
+
+function FillCreateComment(var Req: TCreateCommentRequest;
+                 const Group, Field, Value: TStr): TFillOutcome;
+var
+  Res: TFillOutcome;
+  Tmp: Int64;
+begin
+  Res := foOk;
+  if StrEqPas(Group, 'meta') then
+  begin
+    if StrEqPas(Field, 'traceId') then
+    begin
+      Req.meta.traceId := Value;
+    end
+    else if StrEqPas(Field, 'commandId') then
+    begin
+      Req.meta.commandId := Value;
+    end
+    else if StrEqPas(Field, 'issuedAtMillis') then
+    begin
+      if StrToInt64(Value, Tmp) then
+        Req.meta.issuedAtMillis := Tmp
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'command') then
+  begin
+    if StrEqPas(Field, 'commentId') then
+    begin
+      Req.command.commentId := Value;
+    end
+    else if StrEqPas(Field, 'postId') then
+    begin
+      Req.command.postId := Value;
+    end
+    else if StrEqPas(Field, 'body') then
+    begin
+      Req.command.body := Value;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'actor') then
+  begin
+    if StrEqPas(Field, 'userId') then
+    begin
+      Req.actor.userId := Value;
+    end
+    else if StrEqPas(Field, 'role') then
+    begin
+      if not ParseRole(Value, Req.actor.role) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'status') then
+    begin
+      if not ParseUserStatus(Value, Req.actor.status) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'postsLastHour') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.actor.postsLastHour := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'commentsLastHour') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.actor.commentsLastHour := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'post') then
+  begin
+    if StrEqPas(Field, 'exists') then
+    begin
+      if StrEqPas(Value, 'true') then Req.post.exists := True
+      else if StrEqPas(Value, 'false') then Req.post.exists := False
+      else Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'postId') then
+    begin
+      Req.post.postId := Value;
+    end
+    else if StrEqPas(Field, 'authorId') then
+    begin
+      Req.post.authorId := Value;
+    end
+    else if StrEqPas(Field, 'status') then
+    begin
+      if not ParsePostStatus(Value, Req.post.status) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'version') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.post.version := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else
+    Res := foUnknown;
+  FillCreateComment := Res;
 end;
 
 function FillDeletePost(var Req: TDeletePostRequest;

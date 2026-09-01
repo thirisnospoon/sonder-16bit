@@ -87,6 +87,23 @@ def pascal(doc: dict) -> str:
     out.append("    из TcResult: добавление длинного кода не должно молча")
     out.append("    обрезаться при присваивании в TErrCode. }")
     out.append(f"  ERR_MAX_CODE_LEN = {max(len(c['code']) for c in doc['codes'])};")
+
+    # Коды, которые возвращает ФУНКЦИЯ РЕШЕНИЯ. По каждому golden-набор
+    # обязан иметь случай; полнота проверяется механически, иначе код
+    # существует только на бумаге. Инфраструктурные коды ядра
+    # (decided_by: core-runtime) сюда не попадают: их порождает рантайм,
+    # а не решение.
+    decision = [c["code"] for c in doc["codes"] if c.get("decided_by") == "core"]
+    out.append("")
+    out.append("  { Коды, которые возвращает функция решения. По каждому из них")
+    out.append("    golden-набор обязан иметь случай: код, который ничто не")
+    out.append("    порождает, существует только на бумаге. }")
+    out.append(f"  ERR_DECISION_CODE_COUNT = {len(decision)};")
+    out.append(f"  ErrDecisionCodes: array[1..{len(decision)}] of PChar = (")
+    for i, code in enumerate(decision):
+        sep = "," if i < len(decision) - 1 else ""
+        out.append(f"    '{code}'{sep}")
+    out.append("  );")
     out.append("")
     return "\n".join(out) + "\n"
 
@@ -116,7 +133,7 @@ def java(doc: dict) -> str:
         cat = entry["category"]
         http = cats[cat]["http"]
         retryable = str(cats[cat]["retryable"]).lower()
-        core = str(entry["decided_by"] == "core").lower()
+        core = str(entry["decided_by"].startswith("core")).lower()
         desc = " ".join(str(entry["description"]).split())
         sep = "," if i < last else ";"
         out.append(f"    /** {desc} */")
