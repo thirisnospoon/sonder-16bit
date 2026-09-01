@@ -1,0 +1,83 @@
+{
+  "_comment": "СГЕНЕРИРОВАНО из contracts/soap/decider-v1.wsdl. Перечень состояния, объявленного каждой операцией. Тест на стороне оболочки обязан проверять, что она заполняет всё перечисленное: иначе ядро решит по неполным данным (R5).",
+  "source": "contracts/soap/decider-v1.wsdl",
+  "operations": [
+    {
+      "operation": "RegisterUser",
+      "soapAction": "urn:sonder:decider:v1:RegisterUser",
+      "request": "RegisterUserRequest",
+      "requiredContext": [
+        {
+          "element": "nick",
+          "type": "TNickContext"
+        }
+      ]
+    },
+    {
+      "operation": "CreatePost",
+      "soapAction": "urn:sonder:decider:v1:CreatePost",
+      "request": "CreatePostRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        }
+      ]
+    },
+    {
+      "operation": "DeletePost",
+      "soapAction": "urn:sonder:decider:v1:DeletePost",
+      "request": "DeletePostRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        },
+        {
+          "element": "post",
+          "type": "TPostContext"
+        }
+      ]
+    },
+    {
+      "operation": "FollowUser",
+      "soapAction": "urn:sonder:decider:v1:FollowUser",
+      "request": "FollowUserRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        },
+        {
+          "element": "target",
+          "type": "TTargetUserContext"
+        },
+        {
+          "element": "follow",
+          "type": "TFollowContext"
+        }
+      ]
+    },
+    {
+      "operation": "BanUser",
+      "soapAction": "urn:sonder:decider:v1:BanUser",
+      "request": "BanUserRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        },
+        {
+          "element": "target",
+          "type": "TTargetUserContext"
+        }
+      ]
+    },
+    {
+      "operation": "Ping",
+      "soapAction": "urn:sonder:decider:v1:Ping",
+      "request": "PingRequest",
+      "requiredContext": []
+    }
+  ]
+}

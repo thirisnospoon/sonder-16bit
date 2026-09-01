@@ -89,12 +89,38 @@ cmd_contracts_selftest() {
   run_py python tools/validate-contracts/selftest.py
 }
 
+# --------------------------------------------------------------- кодогенерация
+
+cmd_codegen() {
+  ensure_py
+  step "коды отказа на три языка"
+  run_py python tools/gen-errors/gen_errors.py || return 1
+  step "стабы Pascal из WSDL"
+  run_py python tools/wsdl2pas/wsdl2pas.py || return 1
+}
+
+# Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
+# Значит он обязан совпадать с тем, что порождается из контрактов прямо сейчас.
+cmd_check_drift() {
+  step "дрейф сгенерированного кода"
+  cmd_codegen > /dev/null || return 1
+  if ! git diff --quiet -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated 2>/dev/null; then
+    echo "    сгенерированный код разошёлся с контрактами:"
+    git diff --stat -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated | sed 's/^/      /'
+    echo "    перегенерируй: ./sonder codegen"
+    return 1
+  fi
+  echo "    совпадает с контрактами"
+}
+
 cmd_verify() {
   need_docker
   local rc=0
   cmd_check_eol           || rc=1
   cmd_contracts           || rc=1
   cmd_contracts_selftest  || rc=1
+  cmd_check_drift         || rc=1
+  cmd_check_generated     || rc=1
   echo
   if [ "$rc" -eq 0 ]; then
     echo "все проверки пройдены"
@@ -102,6 +128,14 @@ cmd_verify() {
     echo "ЕСТЬ ПРОВАЛЫ"
   fi
   return "$rc"
+}
+
+# Сгенерированный код обязан не только собираться, но и работать: раскладка
+# записей может скомпилироваться и при этом оказаться нерабочей.
+cmd_check_generated() {
+  ensure_dos
+  step "сгенерированный Pascal собирается и работает"
+  run_dos bash dosnode/build/compile-generated.sh
 }
 
 # ------------------------------------------------------------------- спайки
@@ -140,6 +174,9 @@ Sonder — цели
   verify               все проверки, как в CI
   contracts            проверить контракты
   contracts-selftest   убедиться, что валидатор ловит дефекты
+  codegen              перегенерировать код из контрактов
+  check-drift          убедиться, что сгенерированное совпадает с контрактами
+  check-generated      собрать и прогнать сгенерированный Pascal
 
   spikes               прогнать спайки фазы 0
   clean                удалить сборочные артефакты
@@ -157,6 +194,9 @@ case "${1:-help}" in
   check-eol)          cmd_check_eol ;;
   contracts)          need_docker; cmd_contracts ;;
   contracts-selftest) need_docker; cmd_contracts_selftest ;;
+  codegen)            need_docker; cmd_codegen ;;
+  check-drift)        need_docker; cmd_check_drift ;;
+  check-generated)    need_docker; cmd_check_generated ;;
   spikes)             cmd_spikes ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;

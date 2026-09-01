@@ -26,3 +26,6 @@ dist/
 .vscode/
 *.swp
 .DS_Store
+
+# сборочные каталоги dosnode
+/dosnode/build/out/
