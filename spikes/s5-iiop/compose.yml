@@ -1,0 +1,32 @@
+# Два контейнера в одной сети — ровно та топология, в которой IIOP может
+# сломаться: клиент идёт по адресу, который сервер зашил в IOR.
+name: sonder-s5
+
+services:
+  core:
+    build: .
+    command: java -cp classes EnrichmentServer
+    environment:
+      ORB_HOST: core          # имя сервиса в сети compose
+      ORB_PORT: "1050"
+      IOR_PATH: /shared/enrichment.ior
+    volumes:
+      - shared:/shared
+    networks: [sonder]
+
+  events:
+    build: .
+    command: java -cp classes EnrichmentClient
+    environment:
+      IOR_PATH: /shared/enrichment.ior
+      ROUNDS: "200"
+    volumes:
+      - shared:/shared
+    depends_on: [core]
+    networks: [sonder]
+
+volumes:
+  shared:
+
+networks:
+  sonder:

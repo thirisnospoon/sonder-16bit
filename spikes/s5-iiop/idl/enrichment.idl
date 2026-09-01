@@ -1,0 +1,37 @@
+// Спайк S5 — минимальный интерфейс обогащения событий по IIOP.
+//
+// Форма повторяет реальный contracts/idl/enrichment-v1.idl: events дренирует
+// outbox и синхронно спрашивает у core недостающие подробности события.
+//
+// ВАЖНО, выяснено прогоном: тип string в CORBA байтовый и ограничен
+// согласованной кодировкой передачи. Кириллица в него не проходит — вызов
+// падает с DATA_CONVERSION уже в рантайме, на реальных данных, а не при
+// компиляции. Любое поле с человеческим текстом обязано быть wstring.
+// Идентификаторы остаются string: они ASCII по контракту.
+
+module sonder {
+  module enrichment {
+
+    struct PostView {
+      string    postId;        // ASCII по контракту
+      wstring   authorNick;    // может содержать не-ASCII
+      wstring   body;          // произвольный пользовательский текст
+      long long createdAtMillis;
+    };
+
+    exception NotFound {
+      string id;
+    };
+
+    interface Enrichment {
+      PostView loadPost(in string postId) raises (NotFound);
+
+      // Дешёвый вызов для замера круговой задержки без полезной нагрузки.
+      long ping(in long seq);
+
+      // Отдельная проверка границы кодировок: возвращает то, что дали.
+      wstring echoText(in wstring text);
+    };
+
+  };
+};
