@@ -83,6 +83,11 @@ def pascal(doc: dict) -> str:
     out.append("  { Число кодов: полезно для проверки полноты таблиц. }")
     out.append(f"  ERR_CODE_COUNT = {len(doc['codes'])};")
     out.append("")
+    out.append("  { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen")
+    out.append("    из TcResult: добавление длинного кода не должно молча")
+    out.append("    обрезаться при присваивании в TErrCode. }")
+    out.append(f"  ERR_MAX_CODE_LEN = {max(len(c['code']) for c in doc['codes'])};")
+    out.append("")
     return "\n".join(out) + "\n"
 
 

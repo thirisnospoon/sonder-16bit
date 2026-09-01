@@ -121,6 +121,7 @@ cmd_verify() {
   cmd_contracts_selftest  || rc=1
   cmd_check_drift         || rc=1
   cmd_check_generated     || rc=1
+  cmd_test                || rc=1
   echo
   if [ "$rc" -eq 0 ]; then
     echo "все проверки пройдены"
@@ -136,6 +137,22 @@ cmd_check_generated() {
   ensure_dos
   step "сгенерированный Pascal собирается и работает"
   run_dos bash dosnode/build/compile-generated.sh
+}
+
+# Тесты TurboCore на обоих таргетах. Расхождение между ними — дефект,
+# а не особенность платформы: ради этого сравнения и существует дуальная
+# сборка (ADR-0005). Первый же модуль оправдал её, поймав переполнение
+# при выравнивании, которое 16-битный таргет проглатывал молча.
+cmd_test() {
+  ensure_dos
+  step "тесты TurboCore на обоих таргетах"
+  run_dos bash dosnode/build/test.sh both
+}
+
+cmd_test_native() {
+  ensure_dos
+  step "тесты TurboCore, нативный таргет"
+  run_dos bash dosnode/build/test.sh native
 }
 
 # ------------------------------------------------------------------- спайки
@@ -177,6 +194,8 @@ Sonder — цели
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
   check-generated      собрать и прогнать сгенерированный Pascal
+  test                 тесты TurboCore на обоих таргетах
+  test-native          только нативный таргет, доли секунды
 
   spikes               прогнать спайки фазы 0
   clean                удалить сборочные артефакты
@@ -197,6 +216,8 @@ case "${1:-help}" in
   codegen)            need_docker; cmd_codegen ;;
   check-drift)        need_docker; cmd_check_drift ;;
   check-generated)    need_docker; cmd_check_generated ;;
+  test)               need_docker; cmd_test ;;
+  test-native)        need_docker; cmd_test_native ;;
   spikes)             cmd_spikes ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
