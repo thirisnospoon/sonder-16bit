@@ -1,18 +1,19 @@
 { ===================================================================
   Тесты мультиплексора.
 
-  Главное здесь — конвейеризация и обратное давление, потому что именно
-  ради них модуль существует. S2 измерил 13 мс накладных на круговой
-  обмен: шестнадцать команд, каждая со своим ожиданием, стоили бы 208 мс
-  чистых накладных, отправленные подряд — одни.
+  Нода — сервер (ADR-0011, ADR-0015), поэтому проверяется серверный
+  жизненный цикл: кадр пришёл на свободный канал — значит началась
+  команда; кадры с FlagMore продолжают её; кадр без флага её заканчивает;
+  ответ уходит на тот же канал; приложение освобождает канал.
 
-  Проверяется и то, что происходит на границах: ответ на закрытый канал,
-  чужой канал, заполненное кольцо, пауза посреди кадра. Каждый из этих
-  случаев на настоящей линии встретится, и ни один не должен ронять ноду.
+  Предыдущая редакция этих тестов описывала клиентский цикл — открыть
+  канал, уснуть, дождаться ответа. Роль была не та, и тесты держали её
+  зелёной. Они переписаны, а не дополнены.
 
-  Тесты чистые: линии нет, байты из кольца сразу скармливаются обратно
-  во вход. Это и есть петля, на которой удобно проверять маршрутизацию
-  без транспорта.
+  Отдельно — границы: канал вне диапазона, ответ на свободный канал,
+  кадр после ответа, заполненное кольцо, пауза посреди кадра. Каждый из
+  этих случаев на настоящей линии встретится, и ни один не должен
+  ронять ноду.
   =================================================================== }
 program TstMux;
 
@@ -31,22 +32,26 @@ const
   TapFile = 'tstmux.tap';
 {$ENDIF}
 
-  PlannedTests = 41;
+  PlannedTests = 54;
 
 var
   R: TResult;
-  F, Reply: TFrame;
-  Replies: array[1..MaxFibers] of TFrame;
-  Chan: Byte;
-  Chans: array[1..MaxFibers] of Byte;
-  Owner: TFiberId;
-  Owners: array[1..MaxFibers] of TFiberId;
-  I, J: Integer;
+  F: TFrame;
+  I: Integer;
   B: Byte;
   Moved: Integer;
   St: TMuxStats;
   Sent: Integer;
   Before: Word;
+  Owner: TFiberId;
+
+  { След вызовов обработчика команд: по одному символу на кадр.
+    «(» — первый кадр, «.» — продолжение, «)» — последний.
+    Первый и последний кадр односегментного сообщения дают «*». }
+  Trace: string;
+  LastChan: Byte;
+  Frames: Integer;
+  Payload: LongInt;
 
 procedure MakeFrame(var Fr: TFrame; C: Byte; Len: Word; Seed: Byte);
 var
@@ -54,15 +59,37 @@ var
 begin
   FillChar(Fr, SizeOf(Fr), 0);
   Fr.Channel := C;
-  Fr.Flags := FlagNeedsReply;
   Fr.Len := Len;
   if Len > 0 then
     for K := 0 to Len - 1 do
       Fr.Payload[K] := Byte((K + Seed) and $FF);
 end;
 
-{ Петля: всё, что лежит в исходящем кольце, подаётся обратно на вход.
-  Возвращает число перенесённых байт. }
+{ Обработчик команд. far обязателен: в модели large переменная
+  процедурного типа — дальний указатель. }
+procedure OnCommand(Chan: Byte; const F: TFrame;
+                    First, Last: Boolean); far;
+begin
+  LastChan := Chan;
+  Inc(Frames);
+  Inc(Payload, F.Len);
+  if Length(Trace) > 200 then Exit;
+  if First and Last then Trace := Trace + '*'
+  else if First then Trace := Trace + '('
+  else if Last then Trace := Trace + ')'
+  else Trace := Trace + '.';
+end;
+
+procedure ClearTrace;
+begin
+  Trace := '';
+  Frames := 0;
+  Payload := 0;
+  LastChan := 0;
+end;
+
+{ Отправить кадр в линию и тут же подать его обратно на вход: петля, на
+  которой удобно проверять маршрутизацию без транспорта. }
 function Loopback: Integer;
 var
   N: Integer;
@@ -77,21 +104,26 @@ begin
   Loopback := N;
 end;
 
-function PayloadEq(const A, C: TFrame): Boolean;
+{ Подать кадр на вход напрямую, минуя кольцо: так гейтвей и присылает
+  команды — они не проходят через нашу очередь на отправку. }
+procedure Inject(const Fr: TFrame; More: Boolean);
 var
-  K: Word;
+  Buf: array[0..MaxFrameBytes - 1] of Byte;
+  N, K: Word;
+  G: TFrame;
+  Rr: TResult;
 begin
-  PayloadEq := False;
-  if A.Len <> C.Len then Exit;
-  if A.Len > 0 then
-    for K := 0 to A.Len - 1 do
-      if A.Payload[K] <> C.Payload[K] then Exit;
-  PayloadEq := True;
+  G := Fr;
+  if More then G.Flags := G.Flags or FlagMore;
+  Rr := FrameEncode(G, Buf, SizeOf(Buf), N);
+  if not Rr.Ok then Exit;
+  for K := 0 to N - 1 do
+    MuxFeedByte(Buf[K]);
 end;
 
 begin
   TestBegin(TapFile, PlannedTests);
-  TestDiag('мультиплексор');
+  TestDiag('мультиплексор, серверная сторона');
 {$IFDEF CPU16}
   TestDiag('таргет: i8086-msdos');
 {$ELSE}
@@ -101,140 +133,202 @@ begin
   TestDiagInt('каналов данных', LastDataChan);
 
   { ================================================================
-    Каналы
+    Входящая команда в один кадр
     ================================================================ }
 
   MuxReset;
   SchedReset;
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
 
   TestEqInt('после сброса каналы свободны',
-            Ord(MuxChanState(1)), Ord(csFree));
+            Ord(MuxChanState(3)), Ord(csFree));
+  TestEqInt('после сброса активных каналов нет', MuxActive, 0);
 
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-  TestResultOk('канал открывается', R);
-  TestTrue('номер канала в пределах данных',
-           (Chan >= FirstDataChan) and (Chan <= LastDataChan));
-  TestEqInt('открытый канал ждёт ответа',
-            Ord(MuxChanState(Chan)), Ord(csWaiting));
+  MakeFrame(F, 3, 100, 7);
+  Inject(F, False);
 
-  MuxClose(Chan);
-  TestEqInt('закрытый канал свободен',
-            Ord(MuxChanState(Chan)), Ord(csFree));
-
-  { Без буфера ответ класть некуда, и выяснилось бы это только когда
-    ответ придёт. Отказ выдаётся сразу. }
-  R := MuxOpen(Owner, nil, Chan);
-  TestResultErr('канал без буфера ответа отвергается', R, ERR_DECIDER_PANIC);
-
-  { Предел каналов совпадает с пределом команд. }
-  MuxReset;
-  Sent := 0;
-  for I := 1 to MaxFibers do
-  begin
-    R := MuxOpen(TFiberId(I), @Replies[I], Chans[I]);
-    if R.Ok then Inc(Sent);
-  end;
-  TestEqInt('открылись все каналы данных', Sent, MaxFibers);
-  R := MuxOpen(1, @Reply, Chan);
-  TestResultErr('сверх предела каналов — отказ', R, ERR_DECIDER_UNAVAILABLE);
-
-  { ================================================================
-    Круг через петлю
-    ================================================================ }
-
-  MuxReset;
-  SchedReset;
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-
-  MakeFrame(F, Chan, 128, 7);
-  R := MuxSend(F);
-  TestResultOk('кадр кладётся в кольцо', R);
-  TestEqInt('кольцо содержит весь кадр',
-            MuxOutPending, HeaderBytes + 128 + TrailerBytes);
-
-  Moved := Loopback;
-  TestEqInt('петля перенесла все байты',
-            Moved, HeaderBytes + 128 + TrailerBytes);
-  TestEqInt('кольцо опустело', MuxOutPending, 0);
-
-  TestEqInt('канал получил ответ', Ord(MuxChanState(Chan)), Ord(csDone));
-  TestTrue('ответ лёг в буфер владельца побайтно', PayloadEq(F, Reply));
-  TestEqInt('номер канала в ответе сохранён', Reply.Channel, Chan);
+  TestEqStr('односегментная команда — один вызов, первый и последний',
+            Trace, '*');
+  TestEqInt('канал команды дошёл до обработчика', LastChan, 3);
+  TestEqInt('полезная нагрузка дошла целиком', Payload, 100);
+  TestEqInt('канал занят обработкой',
+            Ord(MuxChanState(3)), Ord(csServing));
+  TestEqInt('канал числится активным', MuxActive, 1);
 
   St := MuxGetStats;
-  TestEqInt('счётчик доставленных', St.Delivered, 1);
+  TestEqInt('команда посчитана', St.Commands, 1);
+  TestEqInt('сообщение завершено', St.Completed, 1);
+  TestEqInt('продолжений не было', St.Continued, 0);
   TestEqInt('неприкаянных нет', St.Unrouted, 0);
 
   { ================================================================
-    Пробуждение владельца
-
-    Файбер, ждущий ответа, обязан проснуться от его прихода — иначе
-    он повиснет навсегда, а нода будет выглядеть просто медленной.
+    Ответ и освобождение канала
     ================================================================ }
 
-  MuxReset;
-  SchedReset;
-  R := SchedSpawn('waiter', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-  SchedWaitKey(Owner, wrReply, Chan);
-  TestEqInt('владелец уснул в ожидании ответа',
-            Ord(SchedInfo(Owner).State), Ord(fsWaiting));
+  MakeFrame(F, 0, 40, 1);
+  R := MuxReply(3, F, False);
+  TestResultOk('ответ на обслуживаемый канал проходит', R);
+  TestEqInt('ответ лёг в кольцо целиком',
+            MuxOutPending, HeaderBytes + 40 + TrailerBytes);
+  TestEqInt('после ответа канал ждёт освобождения',
+            Ord(MuxChanState(3)), Ord(csAnswered));
 
-  MakeFrame(F, Chan, 16, 1);
-  R := MuxSend(F);
-  Loopback;
-  TestEqInt('приход ответа разбудил владельца',
-            Ord(SchedInfo(Owner).State), Ord(fsReady));
+  { Кадр на канал, ответ по которому уже отправлен. Принять его как
+    продолжение значило бы приписать новую команду закончившейся. }
+  ClearTrace;
+  MakeFrame(F, 3, 8, 2);
+  Inject(F, False);
+  TestEqStr('кадр после ответа обработчику не отдан', Trace, '');
+  St := MuxGetStats;
+  TestEqInt('он посчитан как отклонённый', St.Refused, 1);
+
+  MuxRelease(3);
+  TestEqInt('освобождённый канал свободен',
+            Ord(MuxChanState(3)), Ord(csFree));
+  TestEqInt('активных каналов не осталось', MuxActive, 0);
 
   { ================================================================
-    Конвейеризация — то, ради чего модуль существует
+    Многокадровое сообщение
+
+    Конверт с телом поста на тысячу символов — около четырёх с половиной
+    килобайт при полезной нагрузке кадра в 512. До ADR-0015 флаг FlagMore
+    был объявлен и не обрабатывался никем.
     ================================================================ }
 
   MuxReset;
   SchedReset;
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
 
-  { Шестнадцать команд отправляют запросы, не дожидаясь ответов. }
-  Sent := 0;
-  for I := 1 to MaxFibers do
-  begin
-    R := SchedSpawn('c', Owners[I]);
-    R := MuxOpen(Owners[I], @Replies[I], Chans[I]);
-    if R.Ok then
-    begin
-      MakeFrame(F, Chans[I], 40, Byte(I));
-      R := MuxSend(F);
-      if R.Ok then Inc(Sent);
-    end;
-  end;
+  MakeFrame(F, 5, MaxPayload, 1);
+  Inject(F, True);
+  MakeFrame(F, 5, MaxPayload, 2);
+  Inject(F, True);
+  MakeFrame(F, 5, 200, 3);
+  Inject(F, False);
 
-  TestEqInt('все шестнадцать запросов ушли в кольцо без ожидания',
-            Sent, MaxFibers);
-  TestEqInt('в кольце лежат все кадры сразу',
-            MuxOutPending, MaxFibers * (HeaderBytes + 40 + TrailerBytes));
-
-  Moved := Loopback;
-  TestEqInt('петля перенесла всё', Moved,
-            MaxFibers * (HeaderBytes + 40 + TrailerBytes));
-
-  Sent := 0;
-  for I := 1 to MaxFibers do
-    if MuxChanState(Chans[I]) = csDone then Inc(Sent);
-  TestEqInt('ответ получил каждый канал', Sent, MaxFibers);
-
-  { Ответы не перепутались между каналами — самая дорогая ошибка
-    мультиплексора, потому что она даёт правдоподобный неверный результат. }
-  Sent := 0;
-  for I := 1 to MaxFibers do
-    if (Replies[I].Channel = Chans[I]) and
-       (Replies[I].Payload[0] = Byte(I)) then Inc(Sent);
-  TestEqInt('ответы не перепутались между каналами', Sent, MaxFibers);
+  TestEqStr('три кадра: начало, продолжение, конец', Trace, '(.)');
+  TestEqInt('все кадры дошли до обработчика', Frames, 3);
+  TestEqInt('нагрузка сложилась целиком',
+            Payload, LongInt(MaxPayload) * 2 + 200);
 
   St := MuxGetStats;
-  TestEqInt('доставлено ровно шестнадцать', St.Delivered, MaxFibers);
-  TestEqInt('обратного давления не было', St.Backpressure, 0);
-  TestDiagInt('пик занятости кольца, байт', St.OutHighMark);
+  TestEqInt('команда одна на всё сообщение', St.Commands, 1);
+  TestEqInt('продолжений два', St.Continued, 2);
+  TestEqInt('завершение одно', St.Completed, 1);
+
+  { Ответ тоже может не поместиться в кадр. }
+  MakeFrame(F, 0, MaxPayload, 9);
+  R := MuxReply(5, F, True);
+  TestResultOk('первая часть ответа проходит', R);
+  TestEqInt('после части с продолжением канал ещё обслуживается',
+            Ord(MuxChanState(5)), Ord(csServing));
+  MakeFrame(F, 0, 10, 9);
+  R := MuxReply(5, F, False);
+  TestResultOk('последняя часть ответа проходит', R);
+  TestEqInt('после последней части канал ждёт освобождения',
+            Ord(MuxChanState(5)), Ord(csAnswered));
+
+  { ================================================================
+    Одновременность
+
+    Шестнадцать команд на разных каналах, кадры вперемешку. Разведение
+    по каналам — единственная работа, ради которой модуль существует.
+    ================================================================ }
+
+  MuxReset;
+  SchedReset;
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
+
+  { Первые кадры всех шестнадцати. }
+  for I := FirstDataChan to LastDataChan do
+  begin
+    MakeFrame(F, Byte(I), 40, Byte(I));
+    Inject(F, True);
+  end;
+  TestEqInt('шестнадцать команд начаты', MuxActive, MaxFibers);
+
+  { Вторые кадры в обратном порядке: перемешанность важнее порядка. }
+  for I := LastDataChan downto FirstDataChan do
+  begin
+    MakeFrame(F, Byte(I), 40, Byte(I));
+    Inject(F, False);
+  end;
+
+  St := MuxGetStats;
+  TestEqInt('команд ровно шестнадцать', St.Commands, MaxFibers);
+  TestEqInt('продолжений ровно шестнадцать', St.Continued, MaxFibers);
+  TestEqInt('завершений ровно шестнадцать', St.Completed, MaxFibers);
+  TestEqInt('кадров обработчику ровно тридцать два', Frames, MaxFibers * 2);
+
+  { Ответы уходят в произвольном порядке: медленный ответ на одном канале
+    не имеет права задержать остальные. }
+  MuxReset;
+  MuxSetCommandHandler(OnCommand);
+  for I := FirstDataChan to LastDataChan do
+  begin
+    MakeFrame(F, Byte(I), 8, 0);
+    Inject(F, False);
+  end;
+  Sent := 0;
+  for I := LastDataChan downto FirstDataChan do
+  begin
+    MakeFrame(F, 0, 8, 0);
+    R := MuxReply(Byte(I), F, False);
+    if R.Ok then Inc(Sent);
+  end;
+  TestEqInt('ответы уходят в любом порядке', Sent, MaxFibers);
+
+  { ================================================================
+    Владелец канала
+    ================================================================ }
+
+  MuxReset;
+  SchedReset;
+  MuxSetCommandHandler(OnCommand);
+  MakeFrame(F, 2, 8, 0);
+  Inject(F, False);
+  R := SchedSpawn('cmd', Owner);
+  MuxSetOwner(2, Owner);
+  TestEqInt('владелец канала записан', LongInt(MuxOwner(2)), LongInt(Owner));
+  MuxRelease(2);
+  TestEqInt('после освобождения владелец сброшен',
+            LongInt(MuxOwner(2)), LongInt(SchedulerId));
+
+  { ================================================================
+    Границы
+    ================================================================ }
+
+  MuxReset;
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
+
+  { Номер вне диапазона данных: либо порча, пережившая CRC, либо гейтвей
+    нумерует не так, как договорились. }
+  MakeFrame(F, 200, 8, 1);
+  Inject(F, False);
+  TestEqStr('кадр вне диапазона обработчику не отдан', Trace, '');
+  St := MuxGetStats;
+  TestEqInt('он посчитан как неприкаянный', St.Unrouted, 1);
+
+  { Ответ на свободный канал — дефект приложения, а не линии. }
+  MakeFrame(F, 0, 8, 1);
+  R := MuxReply(7, F, False);
+  TestResultErr('ответ на свободный канал отвергается', R, ERR_DECIDER_PANIC);
+  R := MuxReply(200, F, False);
+  TestResultErr('ответ на канал вне диапазона отвергается',
+                R, ERR_DECIDER_PANIC);
+
+  { Без обработчика команды принимаются и отбрасываются: канал в порядке,
+    просто некому обслуживать. }
+  MuxReset;
+  MakeFrame(F, 4, 8, 1);
+  Inject(F, False);
+  St := MuxGetStats;
+  TestEqInt('без обработчика команда всё равно посчитана', St.Commands, 1);
+  TestEqInt('и неприкаянной не считается', St.Unrouted, 0);
 
   { ================================================================
     Обратное давление
@@ -263,65 +357,39 @@ begin
   TestResultErr('при нехватке места отказ', R, ERR_DECIDER_UNAVAILABLE);
   TestEqInt('после отказа кольцо не изменилось', MuxOutPending, Before);
 
-  { После разгрузки отправка снова проходит. }
   for I := 1 to 600 do
     if not MuxOutByte(B) then Break;
   R := MuxSend(F);
   TestResultOk('после разгрузки отправка проходит', R);
 
   { ================================================================
-    Границы: чужие и закрытые каналы, пауза
+    Пауза в линии
     ================================================================ }
 
   MuxReset;
-  SchedReset;
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
 
-  { Ответ на канал, которого никто не ждёт. Не авария: запрос мог быть
-    отменён по сроку, а ответ прийти позже. }
-  MakeFrame(F, 5, 8, 1);
-  R := MuxSend(F);
-  Loopback;
-  St := MuxGetStats;
-  TestEqInt('ответ на неоткрытый канал посчитан как неприкаянный',
-            St.Unrouted, 1);
-  TestEqInt('неприкаянный ответ не доставлен', St.Delivered, 0);
-
-  { Ответ после закрытия канала тоже неприкаянный, а не порча памяти:
-    буфер владельца к этому моменту мог уже не существовать. }
-  MuxReset;
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-  MuxClose(Chan);
-  MakeFrame(F, Chan, 8, 2);
-  R := MuxSend(F);
-  Loopback;
-  St := MuxGetStats;
-  TestEqInt('ответ после закрытия канала не доставлен', St.Delivered, 0);
-  TestEqInt('он посчитан как неприкаянный', St.Unrouted, 1);
-
-  { Пауза посреди кадра бросает недособранное. }
-  MuxReset;
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-  MakeFrame(F, Chan, 200, 5);
-  R := MuxSend(F);
   { Половина кадра ушла, дальше линия замолчала. }
+  MakeFrame(F, 6, 200, 5);
+  R := MuxSend(F);
   for I := 1 to 100 do
     if not MuxOutByte(B) then Break else MuxFeedByte(B);
   MuxIdle;
   St := MuxGetStats;
   TestEqInt('пауза посреди кадра посчитана', St.IdleResets, 1);
-  TestEqInt('недособранный кадр не доставлен', St.Delivered, 0);
+  TestEqStr('недособранный кадр обработчику не отдан', Trace, '');
 
   { И следующий кадр после паузы собирается. }
   MuxReset;
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
-  MakeFrame(F, Chan, 32, 9);
+  MuxSetCommandHandler(OnCommand);
+  ClearTrace;
+  MakeFrame(F, 6, 32, 9);
   R := MuxSend(F);
-  Loopback;
-  TestEqInt('после паузы следующий кадр доставлен',
-            Ord(MuxChanState(Chan)), Ord(csDone));
+  Moved := Loopback;
+  TestEqInt('петля перенесла весь кадр',
+            Moved, HeaderBytes + 32 + TrailerBytes);
+  TestEqStr('после паузы следующий кадр доходит', Trace, '*');
 
   { Пауза при пустом декодере ничего не значит. }
   MuxReset;

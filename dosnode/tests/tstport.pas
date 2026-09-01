@@ -35,12 +35,25 @@ var
   R: TResult;
   St: TPortStats;
   MSt: TMuxStats;
-  F, Reply: TFrame;
+  F: TFrame;
+  { Нода — сервер (ADR-0015): кадр, вернувшийся по петле, приходит как
+    входящая команда, а не как ответ на открытый нами канал. }
+  GotChan: Byte;
+  GotLen:  Word;
+  GotCount: Integer;
   Chan: Byte;
   Owner: TFiberId;
   I, N: Integer;
   B: Byte;
   Now: LongInt;
+
+procedure OnCommand(Chan: Byte; const Fr: TFrame;
+                    First, Last: Boolean); far;
+begin
+  GotChan := Chan;
+  GotLen := Fr.Len;
+  Inc(GotCount);
+end;
 
 procedure MakeFrame(var Fr: TFrame; C: Byte; Len: Word; Seed: Byte);
 var
@@ -175,8 +188,9 @@ begin
   PortPump(Now);
   DrainOut;
 
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
+  MuxSetCommandHandler(OnCommand);
+  GotCount := 0;
+  Chan := 1;
   MakeFrame(F, Chan, 64, 5);
   R := MuxSend(F);
   TestResultOk('кадр поставлен в очередь', R);
@@ -206,16 +220,17 @@ begin
   Circulate(Now, 4);
   TestTrue('петля замкнула рукопожатие', PortReady);
 
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
+  MuxSetCommandHandler(OnCommand);
+  GotCount := 0;
+  Chan := 1;
   MakeFrame(F, Chan, 64, 5);
   R := MuxSend(F);
   Circulate(Now, 4);
 
-  TestEqInt('кадр вернулся через линию и доставлен каналу',
-            Ord(MuxChanState(Chan)), Ord(csDone));
-  TestEqInt('номер канала сохранён', Reply.Channel, Chan);
-  TestEqInt('длина сохранена', Reply.Len, 64);
+  TestEqInt('кадр вернулся через линию и дошёл до обработчика',
+            GotCount, 1);
+  TestEqInt('номер канала сохранён', GotChan, Chan);
+  TestEqInt('длина сохранена', GotLen, 64);
 
   St := PortGetStats;
   TestTrue('принятые байты посчитаны', St.RxBytes > 0);
@@ -232,8 +247,9 @@ begin
   PortPump(Now);
   DrainOut;
 
-  R := SchedSpawn('a', Owner);
-  R := MuxOpen(Owner, @Reply, Chan);
+  MuxSetCommandHandler(OnCommand);
+  GotCount := 0;
+  Chan := 1;
   MakeFrame(F, Chan, 200, 3);
   R := MuxSend(F);
   PortPump(Now);
@@ -250,7 +266,7 @@ begin
   PortPump(Now);
 
   MSt := MuxGetStats;
-  TestEqInt('недособранный кадр не доставлен', MSt.Delivered, 0);
+  TestEqInt('недособранный кадр не отдан обработчику', MSt.Commands, 0);
 
   { Молчание дольше порога — обрыв. }
   Now := 10;
@@ -269,8 +285,7 @@ begin
   R := PortInjectFrame(F);
   Now := 21;
   PortPump(Now);
-  TestEqInt('после паузы следующий кадр доставлен',
-            Ord(MuxChanState(Chan)), Ord(csDone));
+  TestEqInt('после паузы следующий кадр доставлен', GotCount, 1);
 
   { ================================================================
     Закрытие
