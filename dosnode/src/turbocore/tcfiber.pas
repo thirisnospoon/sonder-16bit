@@ -82,15 +82,26 @@ const
   FillPattern = $A5A5;
 
   { Смещения кадра от вершины стека, в словах. Порядок задан тем, что
-    кладёт на стек дальний вызов и последующие push в FiberSwitch:
-    от младших адресов к старшим — ES, DS, DI, SI, BP, IP, CS. }
-  OfsCS = 2;
-  OfsIP = 3;
-  OfsBP = 4;
-  OfsSI = 5;
-  OfsDI = 6;
-  OfsDS = 7;
-  OfsES = 8;
+    кладёт на стек дальний вызов и последующие push в ContextSwitch:
+    от младших адресов к старшим — FLAGS, ES, DS, DI, SI, BP, IP, CS.
+
+    Список обязан совпадать с телом ContextSwitch слово в слово. Первая
+    версия этого модуля пришла из спайка S1b, где стояли cli и sti; при
+    замене их на pushf и popf кадр вырос на слово, а константы остались
+    прежними — и первое же настоящее переключение уводило управление в
+    мусор. }
+  OfsCS    = 2;
+  OfsIP    = 3;
+  OfsBP    = 4;
+  OfsSI    = 5;
+  OfsDI    = 6;
+  OfsDS    = 7;
+  OfsES    = 8;
+  OfsFlags = 9;   { сюда встанет SP }
+
+  { Флаги нового файбера: прерывания разрешены, бит 1 зарезервирован
+    и всегда установлен. }
+  InitialFlags = $0202;
 
 type
   TFarAddr = record
@@ -223,9 +234,10 @@ begin
   W^[Words - OfsDI] := 0;
   W^[Words - OfsDS] := Dseg;
   W^[Words - OfsES] := Dseg;
+  W^[Words - OfsFlags] := InitialFlags;
 
   SSSlots[Id] := NSeg;
-  SPSlots[Id] := NOfs + (Words - OfsES) * 2;
+  SPSlots[Id] := NOfs + (Words - OfsFlags) * 2;
   StackBase[Id] := W;
   StackWords[Id] := Words;
 
