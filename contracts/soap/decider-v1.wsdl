@@ -1,0 +1,401 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Контракт доменного ядра, версия 1.
+
+  NODE-7 — сервер, оболочка на Java — клиент. Ядро принимает команду вместе
+  с состоянием, необходимым для решения, и возвращает решение. Никакого
+  ввода-вывода на стороне ядра: всё, что нужно, приходит в запросе.
+
+  ГЛАВНОЕ ПРАВИЛО. Каждая операция объявляет три вещи:
+      meta     — сквозные атрибуты: трассировка и идемпотентность
+      command  — чего хочет пользователь
+      context  — состояние, без которого решение невозможно
+
+  Все поля внутри типов, оканчивающихся на Context, обязательны. Это не
+  придирка: необязательное поле состояния означает, что ядро однажды получит
+  запрос без него и примет решение по неполным данным. Обнаружится это не в
+  тестах, а на реальных данных (docs/RISKS.md, R5). Пропуск обязан ломаться
+  маршалингом, а не оборачиваться значением по умолчанию.
+
+  ЦЕНА ПОЛЯ. Линия между оболочкой и ядром даёт 11 520 Б/с, и каждый байт
+  состояния вычитается из пропускной способности записи напрямую
+  (docs/PHASE0-FINDINGS.md, S2). Состояние объявляется минимально достаточным,
+  и это предмет обязательного ревью, а не вкуса.
+
+  Версия зафиксирована в имени. Совместимые изменения — добавление
+  необязательных полей вне Context. Ломающие — новая мажорная версия рядом
+  со старой.
+-->
+<wsdl:definitions
+    name="Decider"
+    targetNamespace="urn:sonder:decider:v1"
+    xmlns:tns="urn:sonder:decider:v1"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/">
+
+  <wsdl:types>
+    <xs:schema targetNamespace="urn:sonder:decider:v1"
+               xmlns:tns="urn:sonder:decider:v1"
+               elementFormDefault="qualified">
+
+      <!-- ================================================================
+           Перечисления
+           ================================================================ -->
+
+      <xs:simpleType name="Role">
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="USER"/>
+          <xs:enumeration value="MODERATOR"/>
+          <xs:enumeration value="ADMIN"/>
+        </xs:restriction>
+      </xs:simpleType>
+
+      <xs:simpleType name="UserStatus">
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="ACTIVE"/>
+          <xs:enumeration value="BANNED"/>
+          <xs:enumeration value="DELETED"/>
+        </xs:restriction>
+      </xs:simpleType>
+
+      <xs:simpleType name="PostStatus">
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="VISIBLE"/>
+          <xs:enumeration value="DELETED"/>
+        </xs:restriction>
+      </xs:simpleType>
+
+      <!-- Идентификаторы ASCII по контракту: ядро сравнивает их побайтно. -->
+      <xs:simpleType name="Id">
+        <xs:restriction base="xs:string">
+          <xs:pattern value="[A-Za-z0-9_-]{1,40}"/>
+        </xs:restriction>
+      </xs:simpleType>
+
+      <!-- ================================================================
+           Сквозные атрибуты
+           ================================================================ -->
+
+      <xs:complexType name="CommandMeta">
+        <xs:sequence>
+          <!-- Живёт от входящего HTTP до строки лога NODE-7. -->
+          <xs:element name="traceId" type="tns:Id"/>
+          <!-- Идемпотентность: повтор той же команды не порождает событий дважды. -->
+          <xs:element name="commandId" type="tns:Id"/>
+          <xs:element name="issuedAtMillis" type="xs:long"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <!-- ================================================================
+           Состояние. Все поля обязательны — см. шапку.
+           ================================================================ -->
+
+      <!-- Тот, кто выполняет действие. Счётчики частоты приходят вместе
+           с ним: ядро не умеет их считать, у него нет ни базы, ни часов. -->
+      <xs:complexType name="ActorContext">
+        <xs:sequence>
+          <xs:element name="userId"           type="tns:Id"/>
+          <xs:element name="role"             type="tns:Role"/>
+          <xs:element name="status"           type="tns:UserStatus"/>
+          <xs:element name="postsLastHour"    type="xs:int"/>
+          <xs:element name="commentsLastHour" type="xs:int"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <!-- Тот, над кем действие выполняется. -->
+      <xs:complexType name="TargetUserContext">
+        <xs:sequence>
+          <xs:element name="exists"  type="xs:boolean"/>
+          <xs:element name="userId"  type="tns:Id"/>
+          <xs:element name="role"    type="tns:Role"/>
+          <xs:element name="status"  type="tns:UserStatus"/>
+          <xs:element name="version" type="xs:int"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:complexType name="PostContext">
+        <xs:sequence>
+          <xs:element name="exists"   type="xs:boolean"/>
+          <xs:element name="postId"   type="tns:Id"/>
+          <xs:element name="authorId" type="tns:Id"/>
+          <xs:element name="status"   type="tns:PostStatus"/>
+          <xs:element name="version"  type="xs:int"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:complexType name="NickContext">
+        <xs:sequence>
+          <!-- Уникальность ника проверяется индексом в базе, а не ядром. -->
+          <xs:element name="taken" type="xs:boolean"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:complexType name="FollowContext">
+        <xs:sequence>
+          <xs:element name="alreadyFollowing" type="xs:boolean"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <!-- ================================================================
+           Решение
+           ================================================================ -->
+
+      <xs:complexType name="EventField">
+        <xs:sequence>
+          <xs:element name="key"   type="xs:string"/>
+          <xs:element name="value" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:complexType name="DomainEvent">
+        <xs:sequence>
+          <xs:element name="type"        type="xs:string"/>
+          <xs:element name="aggregateId" type="tns:Id"/>
+          <xs:element name="field" type="tns:EventField"
+                      minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <!--
+        Решение возвращается всегда, в том числе при отказе. Отказ — это
+        нормальный результат работы ядра, а не исключительная ситуация:
+        SOAP-fault остаётся для случаев, когда ядро вообще не смогло
+        обработать запрос.
+      -->
+      <xs:complexType name="Decision">
+        <xs:sequence>
+          <xs:element name="accepted"    type="xs:boolean"/>
+          <!-- Код из contracts/errors/errors.yaml. Пуст при accepted=true. -->
+          <xs:element name="errorCode"   type="xs:string" minOccurs="0"/>
+          <xs:element name="errorDetail" type="xs:string" minOccurs="0"/>
+          <xs:element name="event"       type="tns:DomainEvent"
+                      minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <!-- ================================================================
+           Операции
+           ================================================================ -->
+
+      <xs:complexType name="RegisterUserCommand">
+        <xs:sequence>
+          <xs:element name="userId"      type="tns:Id"/>
+          <xs:element name="nick"        type="xs:string"/>
+          <xs:element name="displayName" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="RegisterUserRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:RegisterUserCommand"/>
+            <xs:element name="nick"    type="tns:NickContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:complexType name="CreatePostCommand">
+        <xs:sequence>
+          <xs:element name="postId" type="tns:Id"/>
+          <xs:element name="body"   type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="CreatePostRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:CreatePostCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:complexType name="DeletePostCommand">
+        <xs:sequence>
+          <xs:element name="postId" type="tns:Id"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="DeletePostRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:DeletePostCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+            <xs:element name="post"    type="tns:PostContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:complexType name="FollowUserCommand">
+        <xs:sequence>
+          <xs:element name="targetUserId" type="tns:Id"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="FollowUserRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:FollowUserCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+            <xs:element name="target"  type="tns:TargetUserContext"/>
+            <xs:element name="follow"  type="tns:FollowContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:complexType name="BanUserCommand">
+        <xs:sequence>
+          <xs:element name="targetUserId" type="tns:Id"/>
+          <xs:element name="reason"       type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="BanUserRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:BanUserCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+            <xs:element name="target"  type="tns:TargetUserContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <!-- Один тип ответа на все операции: решение устроено одинаково. -->
+      <xs:element name="DecisionResponse" type="tns:Decision"/>
+
+      <!-- Проверка живости ноды. Не команда: состояния не требует. -->
+      <xs:element name="PingRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="nonce" type="xs:int"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:element name="PingResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="nonce"        type="xs:int"/>
+            <xs:element name="fibersInUse"  type="xs:int"/>
+            <xs:element name="arenaHighMark" type="xs:int"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+    </xs:schema>
+  </wsdl:types>
+
+  <!-- ==================================================================
+       Сообщения
+       ================================================================== -->
+
+  <wsdl:message name="RegisterUserIn"><wsdl:part name="body" element="tns:RegisterUserRequest"/></wsdl:message>
+  <wsdl:message name="CreatePostIn">  <wsdl:part name="body" element="tns:CreatePostRequest"/></wsdl:message>
+  <wsdl:message name="DeletePostIn">  <wsdl:part name="body" element="tns:DeletePostRequest"/></wsdl:message>
+  <wsdl:message name="FollowUserIn">  <wsdl:part name="body" element="tns:FollowUserRequest"/></wsdl:message>
+  <wsdl:message name="BanUserIn">     <wsdl:part name="body" element="tns:BanUserRequest"/></wsdl:message>
+  <wsdl:message name="DecisionOut">   <wsdl:part name="body" element="tns:DecisionResponse"/></wsdl:message>
+  <wsdl:message name="PingIn">        <wsdl:part name="body" element="tns:PingRequest"/></wsdl:message>
+  <wsdl:message name="PingOut">       <wsdl:part name="body" element="tns:PingResponse"/></wsdl:message>
+
+  <!-- ==================================================================
+       Порт
+       ================================================================== -->
+
+  <wsdl:portType name="Decider">
+
+    <wsdl:operation name="RegisterUser">
+      <wsdl:input  message="tns:RegisterUserIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="CreatePost">
+      <wsdl:input  message="tns:CreatePostIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="DeletePost">
+      <wsdl:input  message="tns:DeletePostIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="FollowUser">
+      <wsdl:input  message="tns:FollowUserIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="BanUser">
+      <wsdl:input  message="tns:BanUserIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="Ping">
+      <wsdl:input  message="tns:PingIn"/>
+      <wsdl:output message="tns:PingOut"/>
+    </wsdl:operation>
+
+  </wsdl:portType>
+
+  <!-- ==================================================================
+       Привязка. Document/literal: единственный вариант, который одинаково
+       понимают и CXF, и наш собственный генератор под Pascal.
+       ================================================================== -->
+
+  <wsdl:binding name="DeciderSoap" type="tns:Decider">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+
+    <wsdl:operation name="RegisterUser">
+      <soap:operation soapAction="urn:sonder:decider:v1:RegisterUser"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="CreatePost">
+      <soap:operation soapAction="urn:sonder:decider:v1:CreatePost"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="DeletePost">
+      <soap:operation soapAction="urn:sonder:decider:v1:DeletePost"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="FollowUser">
+      <soap:operation soapAction="urn:sonder:decider:v1:FollowUser"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="BanUser">
+      <soap:operation soapAction="urn:sonder:decider:v1:BanUser"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="Ping">
+      <soap:operation soapAction="urn:sonder:decider:v1:Ping"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+  </wsdl:binding>
+
+  <!--
+    Адрес условен: обмен идёт не по HTTP, а кадрами по последовательной линии
+    через gateway (ADR-0007). Транспорт подменяется, контракт остаётся.
+  -->
+  <wsdl:service name="DeciderService">
+    <wsdl:port name="DeciderPort" binding="tns:DeciderSoap">
+      <soap:address location="http://node7.invalid/decider"/>
+    </wsdl:port>
+  </wsdl:service>
+
+</wsdl:definitions>

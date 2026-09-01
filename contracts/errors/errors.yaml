@@ -1,0 +1,147 @@
+# Единый список кодов отказа.
+#
+# Источник правды. Из этого файла генерируются:
+#   * Java  — enum sonder.contract.ErrorCode
+#   * TS    — union ErrorCode для web
+#   * Pascal — константы в src/generated/errcodes.inc
+#
+# Правила:
+#   * код не переиспользуется и не меняет смысл — только добавляется новый;
+#   * удаление кода — ломающее изменение контракта, новая мажорная версия;
+#   * категория определяет статус HTTP, который отдаст оболочка;
+#   * текст сообщения здесь не хранится: он живёт в локализации веба, а
+#     оболочка и ядро оперируют только кодом.
+
+version: 1
+
+categories:
+  VALIDATION:  { http: 400, retryable: false, description: "Команда не проходит проверку формы" }
+  AUTH:        { http: 401, retryable: false, description: "Не удалось установить личность" }
+  PERMISSION:  { http: 403, retryable: false, description: "Личность установлена, но действие не разрешено" }
+  NOT_FOUND:   { http: 404, retryable: false, description: "Объект не существует" }
+  CONFLICT:    { http: 409, retryable: false, description: "Состояние не допускает этого действия" }
+  RATE_LIMIT:  { http: 429, retryable: true,  description: "Превышено ограничение частоты" }
+  UPSTREAM:    { http: 502, retryable: true,  description: "Отказала зависимость" }
+  INTERNAL:    { http: 500, retryable: false, description: "Дефект системы" }
+
+codes:
+
+  # --- VALIDATION -----------------------------------------------------------
+  - code: NICK_FORMAT_INVALID
+    category: VALIDATION
+    description: "Ник не соответствует [a-z0-9_]{3,20}"
+    decided_by: core          # ядро на Pascal
+  - code: POST_BODY_EMPTY
+    category: VALIDATION
+    description: "Тело поста пустое или состоит из пробельных символов"
+    decided_by: core
+  - code: POST_BODY_TOO_LONG
+    category: VALIDATION
+    description: "Тело поста длиннее допустимого"
+    decided_by: core
+  - code: COMMENT_BODY_EMPTY
+    category: VALIDATION
+    description: "Тело комментария пустое"
+    decided_by: core
+  - code: COMMENT_BODY_TOO_LONG
+    category: VALIDATION
+    description: "Тело комментария длиннее допустимого"
+    decided_by: core
+  - code: BAN_REASON_EMPTY
+    category: VALIDATION
+    description: "Причина блокировки обязательна: она попадает в аудит"
+    decided_by: core
+
+  # --- AUTH -----------------------------------------------------------------
+  # Аутентификация требует обращения к хранилищу и потому целиком в оболочке.
+  - code: SESSION_INVALID
+    category: AUTH
+    description: "Сессия не найдена, истекла или отозвана"
+    decided_by: shell
+  - code: CREDENTIALS_INVALID
+    category: AUTH
+    description: "Неверная пара логин и пароль"
+    decided_by: shell
+
+  # --- PERMISSION -----------------------------------------------------------
+  - code: ACTOR_BANNED
+    category: PERMISSION
+    description: "Заблокированный пользователь не создаёт содержимое"
+    decided_by: core
+  - code: NOT_OWNER
+    category: PERMISSION
+    description: "Действие доступно только владельцу объекта"
+    decided_by: core
+  - code: ROLE_INSUFFICIENT
+    category: PERMISSION
+    description: "Роль не даёт права на это действие"
+    decided_by: core
+  - code: CANNOT_MODERATE_PEER
+    category: PERMISSION
+    description: "Модератор не применяет меры к равному или старшему по роли"
+    decided_by: core
+
+  # --- NOT_FOUND ------------------------------------------------------------
+  - code: USER_NOT_FOUND
+    category: NOT_FOUND
+    description: "Пользователь не существует"
+    decided_by: core
+  - code: POST_NOT_FOUND
+    category: NOT_FOUND
+    description: "Пост не существует"
+    decided_by: core
+
+  # --- CONFLICT -------------------------------------------------------------
+  - code: NICK_TAKEN
+    category: CONFLICT
+    description: "Ник уже занят"
+    decided_by: core
+  - code: SELF_FOLLOW
+    category: CONFLICT
+    description: "Нельзя подписаться на себя"
+    decided_by: core
+  - code: ALREADY_FOLLOWING
+    category: CONFLICT
+    description: "Подписка уже существует"
+    decided_by: core
+  - code: ALREADY_BANNED
+    category: CONFLICT
+    description: "Пользователь уже заблокирован"
+    decided_by: core
+  - code: STATE_VERSION_CONFLICT
+    category: CONFLICT
+    description: "Состояние изменилось между загрузкой и сохранением, команду надо переиграть"
+    decided_by: shell
+
+  # --- RATE_LIMIT -----------------------------------------------------------
+  - code: POST_RATE_EXCEEDED
+    category: RATE_LIMIT
+    description: "Превышено число постов за окно"
+    decided_by: core
+  - code: COMMENT_RATE_EXCEEDED
+    category: RATE_LIMIT
+    description: "Превышено число комментариев за окно"
+    decided_by: core
+  - code: LOGIN_RATE_EXCEEDED
+    category: RATE_LIMIT
+    description: "Слишком много попыток входа"
+    decided_by: shell
+
+  # --- UPSTREAM -------------------------------------------------------------
+  - code: DECIDER_UNAVAILABLE
+    category: UPSTREAM
+    description: "Доменное ядро недоступно или не ответило в срок"
+    decided_by: shell
+
+  # --- INTERNAL -------------------------------------------------------------
+  - code: INSUFFICIENT_CONTEXT
+    category: INTERNAL
+    description: >
+      Ядру не хватило данных для решения: оболочка прислала не всё, что
+      объявлено контрактом. Ядро обязано вернуть этот код, а не додумывать
+      значение по умолчанию. Это дефект, а не пользовательская ошибка.
+    decided_by: core
+  - code: DECIDER_PANIC
+    category: INTERNAL
+    description: "Файбер обработки команды упал, арена сброшена, нода жива"
+    decided_by: core

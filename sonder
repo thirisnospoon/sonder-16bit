@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# Sonder — единая точка входа.
+#
+#   ./sonder bootstrap   собрать образы тулчейна
+#   ./sonder verify      прогнать все проверки, как в CI
+#   ./sonder spikes      прогнать спайки фазы 0
+#   ./sonder help        список целей
+#
+# Из зависимостей нужен только Docker: весь тулчейн живёт в образах, на хосте
+# не устанавливается ничего. Скрипт, а не Makefile, потому что make — это уже
+# зависимость, которой на чистой машине может не оказаться, а bash есть везде,
+# где есть Docker. Makefile остаётся тонкой обёрткой над этим файлом.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+DOS_IMAGE="sonder/dos-toolchain:3.2.2"
+PY_IMAGE="sonder/contracts:1"
+
+run_dos()  { docker run --rm -v "$ROOT:/work" -w /work "$DOS_IMAGE" "$@"; }
+run_py()   { docker run --rm -v "$ROOT:/work" -w /work "$PY_IMAGE"  "$@"; }
+
+step() { echo; echo "==> $*"; }
+die()  { echo "ОШИБКА: $*" >&2; exit 1; }
+
+need_docker() {
+  command -v docker >/dev/null 2>&1 || die "нужен docker"
+  docker info >/dev/null 2>&1 || die "docker недоступен"
+}
+
+have_image() { docker image inspect "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------- bootstrap
+
+cmd_image_dos() {
+  step "образ тулчейна DOS (кросс-компилятор FPC i8086-msdos)"
+  DOCKER_BUILDKIT=1 docker build -f ops/toolchain/Dockerfile -t "$DOS_IMAGE" . \
+    || die "не собрался образ тулчейна"
+}
+
+cmd_image_contracts() {
+  step "образ для проверки контрактов"
+  printf 'FROM python:3.12-slim\nRUN pip install --no-cache-dir pyyaml\nWORKDIR /work\n' \
+    | docker build -q -t "$PY_IMAGE" -f - . > /dev/null \
+    || die "не собрался образ контрактов"
+  echo "    $PY_IMAGE"
+}
+
+cmd_bootstrap() {
+  need_docker
+  cmd_image_contracts
+  cmd_image_dos
+  echo
+  echo "готово: образы собраны"
+}
+
+ensure_py()  { have_image "$PY_IMAGE"  || cmd_image_contracts; }
+ensure_dos() { have_image "$DOS_IMAGE" || cmd_image_dos; }
+
+# ----------------------------------------------------------------- проверки
+
+# Разработка на Windows, исполнение в Linux-контейнерах: shell-скрипт с CRLF
+# там не запускается вовсе (docs/RISKS.md, R10).
+cmd_check_eol() {
+  step "переводы строк в исполняемых файлах"
+  local bad
+  bad=$(find . -path ./.git -prune -o \
+        \( -name '*.sh' -o -name '*.py' -o -name '*.pas' -o -name '*.java' \
+           -o -name 'Makefile' -o -name 'Dockerfile' -o -name 'sonder' \) -print 2>/dev/null \
+        | xargs -r grep -lU $'\r' 2>/dev/null)
+  if [ -n "$bad" ]; then
+    echo "    файлы с CRLF:"
+    echo "$bad" | sed 's/^/      /'
+    return 1
+  fi
+  echo "    все LF"
+}
+
+cmd_contracts() {
+  ensure_py
+  step "проверка контрактов"
+  run_py python tools/validate-contracts/validate.py
+}
+
+cmd_contracts_selftest() {
+  ensure_py
+  step "самопроверка валидатора контрактов"
+  run_py python tools/validate-contracts/selftest.py
+}
+
+cmd_verify() {
+  need_docker
+  local rc=0
+  cmd_check_eol           || rc=1
+  cmd_contracts           || rc=1
+  cmd_contracts_selftest  || rc=1
+  echo
+  if [ "$rc" -eq 0 ]; then
+    echo "все проверки пройдены"
+  else
+    echo "ЕСТЬ ПРОВАЛЫ"
+  fi
+  return "$rc"
+}
+
+# ------------------------------------------------------------------- спайки
+
+cmd_spikes() {
+  need_docker
+  ensure_dos
+  local rc=0
+  step "S1: файберы, модель medium"
+  run_dos bash spikes/s1-fibers/run.sh medium   || rc=1
+  step "S1b: файберы в дальней куче, модель large"
+  run_dos bash spikes/s1-fibers/run-b.sh large  || rc=1
+  step "S2: последовательный транспорт"
+  run_dos bash spikes/s2-transport/run.sh 1     || rc=1
+  step "S3: устойчивость headless-прогона"
+  run_dos bash spikes/s3-headless/run.sh 20     || rc=1
+  step "S5: CORBA между контейнерами"
+  bash spikes/s5-iiop/run.sh                    || rc=1
+  echo
+  [ "$rc" -eq 0 ] && echo "все спайки пройдены" || echo "ЕСТЬ ПРОВАЛЫ"
+  return "$rc"
+}
+
+cmd_clean() {
+  rm -rf spikes/*/out
+  echo "сборочные артефакты удалены"
+}
+
+cmd_help() {
+  cat <<'TXT'
+Sonder — цели
+
+  bootstrap            собрать образы тулчейна
+                       первый раз долго: тянутся исходники FPC и Open Watcom
+
+  verify               все проверки, как в CI
+  contracts            проверить контракты
+  contracts-selftest   убедиться, что валидатор ловит дефекты
+
+  spikes               прогнать спайки фазы 0
+  clean                удалить сборочные артефакты
+
+Состояние: фаза 0 пройдена, фаза 1 в работе.
+Из зависимостей нужен только Docker.
+TXT
+}
+
+case "${1:-help}" in
+  bootstrap)          cmd_bootstrap ;;
+  image-dos)          need_docker; cmd_image_dos ;;
+  image-contracts)    need_docker; cmd_image_contracts ;;
+  verify)             cmd_verify ;;
+  check-eol)          cmd_check_eol ;;
+  contracts)          need_docker; cmd_contracts ;;
+  contracts-selftest) need_docker; cmd_contracts_selftest ;;
+  spikes)             cmd_spikes ;;
+  clean)              cmd_clean ;;
+  help|-h|--help)     cmd_help ;;
+  *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;
+esac
