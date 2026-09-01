@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Обёртка над кросс-компилятором для таргета i8086-msdos.
+#
+#   fpc-dos <model> [аргументы ppcross8086...]
+#
+# Модель памяти определяет и каталог RTL, и ключ -Wm, поэтому задаётся один раз
+# и в одном месте. Конфиг компилятора по умолчанию игнорируется (-n): пути к
+# модулям задаются явно, чтобы сборка была детерминированной.
+set -euo pipefail
+
+FPC_VERSION="${FPC_VERSION:-3.2.2}"
+
+if [ $# -lt 1 ]; then
+  echo "использование: fpc-dos <model> [аргументы...]" >&2
+  echo "доступные модели: $(tr '\n' ' ' < /opt/fpc/AVAILABLE_MODELS 2>/dev/null)" >&2
+  exit 64
+fi
+
+MODEL="$1"; shift
+
+if ! grep -qx "$MODEL" /opt/fpc/AVAILABLE_MODELS 2>/dev/null; then
+  echo "модель '$MODEL' в образе недоступна" >&2
+  echo "доступные: $(tr '\n' ' ' < /opt/fpc/AVAILABLE_MODELS 2>/dev/null)" >&2
+  exit 64
+fi
+
+UNITDIR_FILE="/opt/fpc/${MODEL}/UNITDIR"
+if [ ! -f "$UNITDIR_FILE" ]; then
+  echo "для модели '$MODEL' нет манифеста $UNITDIR_FILE — образ собран неполно" >&2
+  exit 70
+fi
+UNITS="$(cat "$UNITDIR_FILE")"
+
+# -XX обязателен: RTL собран со smart-linking и лежит архивами (system.a),
+# без этого ключа компилятор ищет несуществующий system.o (F-08).
+# -CX делает смартлинкуемыми и наши модули.
+exec ppcross8086 \
+  -n \
+  -Tmsdos \
+  -Wm"${MODEL}" \
+  -Mtp \
+  -XX \
+  -CX \
+  -Fu"${UNITS}" \
+  -Fo"${UNITS}" \
+  -Fl"${UNITS}" \
+  "$@"
