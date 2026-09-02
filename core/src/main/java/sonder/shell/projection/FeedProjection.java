@@ -28,6 +28,13 @@ import java.util.Set;
  * определению. {@code UPDATE OR INSERT} тут не годится — он принимает
  * только {@code VALUES}, а раскладывать надо выборку.
  *
+ * <p><b>Подписки — свои.</b> Фанаут соединяется с {@code feed_subscriptions},
+ * которую эта же проекция и ведёт из событий {@code follow.created} и
+ * {@code follow.removed}. Таблица {@code follows} принадлежит {@code core},
+ * и читать её отсюда нельзя: {@code events} строит проекции только на том,
+ * чем владеет сам
+ * ([ADR-0016](../../../../../../docs/adr/0016-events-owns-its-data.md)).
+ *
  * <p><b>Тело и время берутся из write-модели.</b> Событие несёт
  * идентичность, а не копию агрегата (см. {@code contracts/events/events.yaml}):
  * в {@code post.created} нет ни тела, ни времени, и читать их надо из
@@ -136,13 +143,16 @@ public final class FeedProjection implements OutboxDrainer.Handler {
             ps.executeUpdate();
         }
 
-        // И каждый, кто на него подписан.
+        // И каждый, кто на него подписан. Подписки берутся из СВОЕЙ
+        // проекции, а не из таблицы follows: та принадлежит core, а
+        // events строит проекции только на том, чем владеет сам
+        // (ADR-0016).
         try (PreparedStatement ps = c.prepareStatement(
                 "MERGE INTO feed_entries fe USING ("
-                        + " SELECT f.follower_id AS owner_id,"
+                        + " SELECT s.follower_id AS owner_id,"
                         + " p.id AS post_id, p.author_id, p.created_at"
                         + " FROM posts p"
-                        + " JOIN follows f ON f.target_id = p.author_id"
+                        + " JOIN feed_subscriptions s ON s.target_id = p.author_id"
                         + " WHERE p.id = ? AND p.status = 'VISIBLE') src"
                         + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
                         + " WHEN NOT MATCHED THEN INSERT"
@@ -179,6 +189,24 @@ public final class FeedProjection implements OutboxDrainer.Handler {
                     "в follow.created нет targetUserId: дотягивать нечего");
         }
 
+        // Сперва граф: он и есть то, чем фанаут будет пользоваться
+        // дальше. Дотягивание прежних постов — следствие, а не причина.
+        try (PreparedStatement ps = c.prepareStatement(
+                "MERGE INTO feed_subscriptions s USING ("
+                        + " SELECT CAST(? AS VARCHAR(40)) AS follower_id,"
+                        + " CAST(? AS VARCHAR(40)) AS target_id"
+                        + " FROM rdb$database) src"
+                        + " ON (s.follower_id = src.follower_id"
+                        + " AND s.target_id = src.target_id)"
+                        + " WHEN NOT MATCHED THEN INSERT"
+                        + " (follower_id, target_id, seen_at)"
+                        + " VALUES (src.follower_id, src.target_id,"
+                        + " CURRENT_TIMESTAMP)")) {
+            ps.setString(1, followerId);
+            ps.setString(2, targetId);
+            ps.executeUpdate();
+        }
+
         try (PreparedStatement ps = c.prepareStatement(
                 "MERGE INTO feed_entries fe USING ("
                         + " SELECT CAST(? AS VARCHAR(40)) AS owner_id,"
@@ -210,6 +238,14 @@ public final class FeedProjection implements OutboxDrainer.Handler {
         if (targetId == null) {
             throw new IllegalStateException(
                     "в follow.removed нет targetUserId: снимать нечего");
+        }
+
+        try (PreparedStatement ps = c.prepareStatement(
+                "DELETE FROM feed_subscriptions WHERE follower_id = ?"
+                        + " AND target_id = ?")) {
+            ps.setString(1, followerId);
+            ps.setString(2, targetId);
+            ps.executeUpdate();
         }
 
         try (PreparedStatement ps = c.prepareStatement(

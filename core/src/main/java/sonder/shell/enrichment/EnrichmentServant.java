@@ -9,6 +9,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Обогащение событий: что `core` рассказывает про свои агрегаты.
@@ -33,6 +35,14 @@ import java.sql.SQLException;
  * случаях. Иначе ответ сообщал бы, что такой пост когда-то был.
  */
 public class EnrichmentServant extends EnrichmentPOA {
+
+    /**
+     * Потолок выборки. Двести — четыре полные страницы ленты по
+     * контракту: достаточно, чтобы лента после подписки не выглядела
+     * пустой, и мало, чтобы одна подписка не стала самым дорогим
+     * вызовом системы.
+     */
+    public static final int MAX_RECENT = 200;
 
     private final ConnectionSource connections;
 
@@ -65,6 +75,43 @@ public class EnrichmentServant extends EnrichmentPOA {
             throw new org.omg.CORBA.TRANSIENT(
                     "база не ответила: " + e.getMessage());
         }
+    }
+
+    /**
+     * Недавние посты автора, новыми вперёд.
+     *
+     * <p>Нужна ровно один раз — когда заводится подписка и ленту надо
+     * наполнить тем, что уже написано. Отсюда и предел: неограниченная
+     * выборка на подписку к плодовитому автору стала бы самым дорогим
+     * вызовом системы.
+     *
+     * <p>Потолок ставит сервер, а не вызывающий. Вызывающий может
+     * попросить меньше, но не больше: предел, за соблюдением которого
+     * следит тот, кого он ограничивает, — не предел.
+     */
+    @Override
+    public PostView[] recentPostsBy(String authorId, int limit) {
+        int take = limit < 1 ? 1 : Math.min(limit, MAX_RECENT);
+        List<PostView> out = new ArrayList<>();
+        try (Connection c = connections.open();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT p.id, u.nick, p.body, p.created_at FROM posts p"
+                             + " JOIN users u ON u.id = p.author_id"
+                             + " WHERE p.author_id = ? AND p.status = 'VISIBLE'"
+                             + " ORDER BY p.created_at DESC, p.id DESC"
+                             + " ROWS " + take)) {
+            ps.setString(1, authorId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new PostView(rs.getString(1), rs.getString(2),
+                            rs.getString(3), rs.getTimestamp(4).getTime()));
+                }
+            }
+        } catch (SQLException e) {
+            throw new org.omg.CORBA.TRANSIENT(
+                    "база не ответила: " + e.getMessage());
+        }
+        return out.toArray(new PostView[0]);
     }
 
     /** Дешёвый вызов для замера круговой задержки без полезной нагрузки. */

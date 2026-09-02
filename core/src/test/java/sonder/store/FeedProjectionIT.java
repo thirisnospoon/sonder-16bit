@@ -93,16 +93,37 @@ class FeedProjectionIT extends FirebirdSupport {
         }
     }
 
+    /**
+     * Подписка так, как её видит проекция: своя строка, а не запись в
+     * follows. Таблица follows принадлежит core, и проекция её больше не
+     * читает (ADR-0016) — тест, набивающий follows, проверял бы то,
+     * чего в бою не происходит.
+     */
     private static void addFollow(String follower, String target)
             throws SQLException {
         try (Connection c = connect();
              PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO follows (follower_id, target_id, created_at)"
-                             + " VALUES (?, ?, ?)")) {
+                     "INSERT INTO feed_subscriptions (follower_id, target_id,"
+                             + " seen_at) VALUES (?, ?, ?)")) {
             ps.setString(1, follower);
             ps.setString(2, target);
             ps.setTimestamp(3, Timestamp.from(T0));
             ps.executeUpdate();
+        }
+    }
+
+    /** Есть ли строка в проекции подписок. */
+    private static boolean subscribed(String follower, String target)
+            throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT COUNT(*) FROM feed_subscriptions"
+                             + " WHERE follower_id = ? AND target_id = ?")) {
+            ps.setString(1, follower);
+            ps.setString(2, target);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getLong(1) > 0;
+            }
         }
     }
 
@@ -219,12 +240,33 @@ class FeedProjectionIT extends FirebirdSupport {
         drainer.drainOnce(T0);
         assertTrue(feedOf("u-boris").isEmpty(), "лента непустая до подписки");
 
-        addFollow("u-boris", "u-andrey");
         enqueue("u-boris", "follow.created", "{\"targetUserId\":\"u-andrey\"}");
         drainer.drainOnce(T0.plusSeconds(120));
 
+        assertTrue(subscribed("u-boris", "u-andrey"),
+                "событие подписки не завело строку графа: следующий пост "
+                        + "автора никуда не разложится");
         assertEquals(java.util.Arrays.asList("p-2", "p-1"), feedOf("u-boris"),
                 "дотянулось не то или не в том порядке: новое сверху");
+    }
+
+    /**
+     * Граф ведётся событиями, и следующий пост уже раскладывается по
+     * нему. Без этой проверки подписка могла бы дотянуть прежнее и не
+     * завести строку — лента наполнилась бы раз и застыла.
+     */
+    @Test
+    @DisplayName("после события подписки следующий пост доходит сам")
+    void followMakesLaterPostsArrive() throws Exception {
+        enqueue("u-boris", "follow.created", "{\"targetUserId\":\"u-andrey\"}");
+        drainer.drainOnce(T0);
+
+        addPost("p-9", "u-andrey", T0.plusSeconds(300));
+        enqueue("p-9", "post.created", "{\"authorId\":\"u-andrey\"}");
+        drainer.drainOnce(T0.plusSeconds(360));
+
+        assertEquals(java.util.Arrays.asList("p-9"), feedOf("u-boris"),
+                "новый пост не дошёл до подписчика, заведённого событием");
     }
 
     @Test
@@ -242,6 +284,11 @@ class FeedProjectionIT extends FirebirdSupport {
         enqueue("u-boris", "follow.removed", "{\"targetUserId\":\"u-andrey\"}");
         drainer.drainOnce(T0.plusSeconds(120));
 
+        assertFalse(subscribed("u-boris", "u-andrey"),
+                "строка графа уцелела: следующий пост автора снова "
+                        + "разложится тому, кто отписался");
+        assertTrue(subscribed("u-boris", "u-vera"),
+                "отписка тронула чужую подписку");
         assertEquals(java.util.Arrays.asList("p-2"), feedOf("u-boris"),
                 "отписка убрала не то");
         assertEquals(java.util.Arrays.asList("p-1"), feedOf("u-andrey"),

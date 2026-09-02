@@ -20,12 +20,26 @@ module sonder {
       long long createdAtMillis;
     };
 
+    // Ограниченная выборка постов одного автора. Нужна ровно один раз —
+    // когда заводится подписка и ленту надо наполнить тем, что уже
+    // написано.
+    typedef sequence<PostView> PostViews;
+
     exception NotFound {
       string id;
     };
 
     interface Enrichment {
       PostView loadPost(in string postId) raises (NotFound);
+
+      // Недавние посты автора, новыми вперёд.
+      //
+      // ПОЧЕМУ ЭТА ОПЕРАЦИЯ ЕСТЬ, А «ДАЙ ПОДПИСЧИКОВ» НЕТ. Здесь длина
+      // ограничена вызывающим и сервером, а зовётся операция раз на
+      // подписку — событие редкое. Список подписчиков был бы
+      // неограниченным и понадобился бы на КАЖДЫЙ пост, то есть упёрся
+      // бы в измеренный потолок дренажа (ADR-0016).
+      PostViews recentPostsBy(in string authorId, in long limit);
 
       // Дешёвый вызов для замера круговой задержки без полезной нагрузки.
       long ping(in long seq);

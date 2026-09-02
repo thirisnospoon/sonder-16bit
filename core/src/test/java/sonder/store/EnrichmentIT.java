@@ -101,6 +101,12 @@ class EnrichmentIT extends FirebirdSupport {
 
     private static void addPost(Connection c, String id, String author,
                                 String body, String status) throws SQLException {
+        addPost(c, id, author, body, status, T0);
+    }
+
+    private static void addPost(Connection c, String id, String author,
+                                String body, String status, Instant at)
+            throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
                 "INSERT INTO posts (id, author_id, body, status, version,"
                         + " created_at) VALUES (?, ?, ?, ?, 0, ?)")) {
@@ -108,7 +114,7 @@ class EnrichmentIT extends FirebirdSupport {
             ps.setString(2, author);
             ps.setString(3, body);
             ps.setString(4, status);
-            ps.setTimestamp(5, Timestamp.from(T0));
+            ps.setTimestamp(5, Timestamp.from(at));
             ps.executeUpdate();
         }
     }
@@ -151,6 +157,59 @@ class EnrichmentIT extends FirebirdSupport {
         assertEquals(BODY, view.body, "тело изменилось на границе ORB");
         assertEquals(T0.toEpochMilli(), view.createdAtMillis,
                 "время не то, а лента упорядочена по нему");
+    }
+
+    @Test
+    @DisplayName("недавние посты автора приезжают новыми вперёд")
+    void recentPostsNewestFirst() throws Exception {
+        try (Connection c = connect()) {
+            addPost(c, "p-2", "u-1", "второй", "VISIBLE",
+                    T0.plusSeconds(60));
+            addPost(c, "p-3", "u-1", "третий", "VISIBLE",
+                    T0.plusSeconds(120));
+            addUser(c, "u-2", "boris", "Борис");
+            addPost(c, "p-чужой", "u-2", "чужой", "VISIBLE", T0);
+        }
+
+        PostView[] recent = client.service().recentPostsBy("u-1", 10);
+
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        for (PostView v : recent) {
+            ids.add(v.postId);
+        }
+        assertEquals(java.util.Arrays.asList("p-3", "p-2", "p-1"), ids,
+                "выборка не та или не в том порядке");
+        assertEquals("третий", recent[0].body, "тело не доехало");
+    }
+
+    /**
+     * Потолок ставит сервер. Предел, за соблюдением которого следит тот,
+     * кого он ограничивает, — не предел.
+     */
+    @Test
+    @DisplayName("запрошенное сверх потолка урезается сервером")
+    void limitIsCappedByServer() throws Exception {
+        try (Connection c = connect()) {
+            for (int i = 2; i <= 6; i++) {
+                addPost(c, "p-" + i, "u-1", "тело " + i, "VISIBLE",
+                        T0.plusSeconds(i * 60));
+            }
+        }
+
+        assertEquals(2, client.service().recentPostsBy("u-1", 2).length,
+                "предел вызывающего не соблюдён");
+        assertTrue(client.service().recentPostsBy("u-1", 1000000).length
+                        <= EnrichmentServant.MAX_RECENT,
+                "сервер отдал больше своего потолка");
+    }
+
+    @Test
+    @DisplayName("у автора без постов выборка пуста, а не отказ")
+    void recentPostsEmpty() throws Exception {
+        try (Connection c = connect()) {
+            addUser(c, "u-3", "vera", "Вера");
+        }
+        assertEquals(0, client.service().recentPostsBy("u-3", 10).length);
     }
 
     @Test
