@@ -143,6 +143,57 @@ public final class Outbox {
         }
     }
 
+    /**
+     * Застрявшие: неопубликованные, у которых накопилось попыток не
+     * меньше порога.
+     *
+     * <p><b>Отбрасывать их автоматически нельзя</b> — так решено там же,
+     * где заведён счётчик попыток: порог, по которому код молча выкидывает
+     * данные, теряет их тихо. Решение принимает человек, а чтобы он мог
+     * его принять, застрявшее должно быть ВИДНО. Этот запрос и есть та
+     * видимость.
+     *
+     * <p>Возвращается пара «сколько» и «самый старый», потому что одного
+     * числа мало: сто застрявших строк из-за одного упавшего соседа и сто
+     * разных ядовитых событий — разные беды, и различает их возраст
+     * самой старой.
+     */
+    public static Stuck stuck(Connection c, int minAttempts) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT COUNT(*), MIN(id) FROM outbox"
+                        + " WHERE published_at IS NULL AND attempts >= ?")) {
+            ps.setInt(1, minAttempts);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return new Stuck(0, -1);
+                }
+                long count = rs.getLong(1);
+                long oldest = rs.getLong(2);
+                return new Stuck(count, rs.wasNull() ? -1 : oldest);
+            }
+        }
+    }
+
+    /** Сколько застряло и какая строка самая старая. */
+    public static final class Stuck {
+        private final long count;
+        private final long oldestId;
+
+        Stuck(long count, long oldestId) {
+            this.count = count;
+            this.oldestId = oldestId;
+        }
+
+        public long getCount() {
+            return count;
+        }
+
+        /** Идентификатор самой старой застрявшей строки; -1, если таких нет. */
+        public long getOldestId() {
+            return oldestId;
+        }
+    }
+
     /** Сколько строк ждёт публикации. Метрика, а не логика. */
     public static long pendingCount(Connection c) throws SQLException {
         try (Statement st = c.createStatement();
