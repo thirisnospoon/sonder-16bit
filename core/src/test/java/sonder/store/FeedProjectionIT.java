@@ -1,5 +1,6 @@
 package sonder.store;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -7,6 +8,9 @@ import org.junit.jupiter.api.Test;
 import sonder.shell.outbox.Outbox;
 import sonder.shell.outbox.OutboxDrainer;
 import sonder.shell.outbox.OutboxEvent;
+import sonder.shell.enrichment.EnrichmentClient;
+import sonder.shell.enrichment.EnrichmentServant;
+import sonder.shell.enrichment.EnrichmentServer;
 import sonder.shell.projection.FeedProjection;
 
 import java.io.File;
@@ -48,14 +52,38 @@ class FeedProjectionIT extends FirebirdSupport {
 
     private OutboxDrainer drainer;
 
+    /**
+     * Обогащение поднимается настоящее, через ORB. Подменить его заглушкой
+     * значило бы не проверить главного: проекция теперь берёт содержимое
+     * ВЫЗОВОМ, и всё, что может сломаться на этой границе, ломается именно
+     * там (ADR-0016).
+     */
+    private static EnrichmentServer server;
+    private static EnrichmentClient client;
+
     @BeforeAll
     static void migrate() throws Exception {
         prepareDatabase();
+        server = EnrichmentServer.start(
+                new EnrichmentServant(FirebirdSupport::connect),
+                "127.0.0.1", 0, null);
+        client = EnrichmentClient.connect(server.getIor());
+    }
+
+    @AfterAll
+    static void stopEnrichment() {
+        if (client != null) {
+            client.close();
+        }
+        if (server != null) {
+            server.close();
+        }
     }
 
     @BeforeEach
     void clean() throws Exception {
-        drainer = new OutboxDrainer(FirebirdSupport::connect, new FeedProjection());
+        drainer = new OutboxDrainer(FirebirdSupport::connect,
+                new FeedProjection(client.service()));
         try (Connection c = connect()) {
             wipe(c);
         }

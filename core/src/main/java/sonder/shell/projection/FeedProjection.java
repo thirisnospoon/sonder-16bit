@@ -1,5 +1,10 @@
 package sonder.shell.projection;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import sonder.enrichment.Enrichment;
+import sonder.enrichment.NotFound;
+import sonder.enrichment.PostView;
 import sonder.shell.outbox.OutboxDrainer;
 import sonder.shell.outbox.OutboxRecord;
 import sonder.shell.outbox.Payloads;
@@ -7,6 +12,7 @@ import sonder.shell.outbox.Payloads;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -20,36 +26,37 @@ import java.util.Set;
  * подход, собирать ленту на чтение соединением с подписками, дешевле
  * пишет и дороже читает, а читают ленту на порядок чаще, чем пишут.
  *
+ * <p><b>Проекция строится только на том, чем владеет {@code events}</b>
+ * ([ADR-0016](../../../../../../docs/adr/0016-events-owns-its-data.md)), и
+ * из этого следуют две разные тактики.
+ *
+ * <p>Подписки — свои: {@code feed_subscriptions} ведёт эта же проекция из
+ * событий {@code follow.created} и {@code follow.removed}. Таблица
+ * {@code follows} принадлежит {@code core}, и читать её отсюда нельзя.
+ *
+ * <p>Содержимое агрегата — вызовом по IIOP. Тело поста и время создания
+ * принадлежат {@code core}: событие несёт идентичность, а не копию
+ * агрегата, и копия в полезной нагрузке была бы вторым источником правды.
+ * Недоступность {@code core} честно останавливает дренаж — лучше
+ * задержка, чем проекция по неполным данным.
+ *
  * <p><b>Идемпотентность не пожелание, а требование.</b> Между обработкой
  * события и коммитом система может упасть, и тогда событие приедет второй
  * раз — не «может быть», а приедет: источник правды это строка очереди, а
  * не факт вызова. Поэтому вставка идёт через {@code MERGE}: строка,
  * которая уже есть, не вставляется второй раз, а удаление повторяемо по
- * определению. {@code UPDATE OR INSERT} тут не годится — он принимает
- * только {@code VALUES}, а раскладывать надо выборку.
- *
- * <p><b>Подписки — свои.</b> Фанаут соединяется с {@code feed_subscriptions},
- * которую эта же проекция и ведёт из событий {@code follow.created} и
- * {@code follow.removed}. Таблица {@code follows} принадлежит {@code core},
- * и читать её отсюда нельзя: {@code events} строит проекции только на том,
- * чем владеет сам
- * ([ADR-0016](../../../../../../docs/adr/0016-events-owns-its-data.md)).
- *
- * <p><b>Тело и время берутся из write-модели.</b> Событие несёт
- * идентичность, а не копию агрегата (см. {@code contracts/events/events.yaml}):
- * в {@code post.created} нет ни тела, ни времени, и читать их надо из
- * {@code posts}. Копия в полезной нагрузке была бы вторым источником
- * правды, который однажды разойдётся с первым.
+ * определению.
  *
  * <p><b>Про неизвестные события.</b> Очередь несёт и то, что ленте не
  * нужно. Молча пропускать всё подряд нельзя: так проекция однажды
  * перестанет замечать событие, которое ей как раз нужно. Поэтому
  * пропускаемое перечислено явно в {@link #IGNORED}, а
  * {@code FeedProjectionIT} сверяет объединение обработанного и
- * пропускаемого с каталогом событий — событие, заведённое в ядре и не
- * упомянутое здесь, красит сборку.
+ * пропускаемого с каталогом событий.
  */
 public final class FeedProjection implements OutboxDrainer.Handler {
+
+    private static final Logger log = LoggerFactory.getLogger(FeedProjection.class);
 
     /**
      * Сколько постов дотягивать в ленту при новой подписке.
@@ -88,6 +95,40 @@ public final class FeedProjection implements OutboxDrainer.Handler {
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
                     "user.registered", "user.banned", "comment.created")));
 
+    /** Строка ленты по готовым значениям. Идемпотентна по первичному ключу. */
+    private static final String MERGE_ONE =
+            "MERGE INTO feed_entries fe USING ("
+                    + " SELECT CAST(? AS VARCHAR(40)) AS owner_id,"
+                    + " CAST(? AS VARCHAR(40)) AS post_id,"
+                    + " CAST(? AS VARCHAR(40)) AS author_id,"
+                    + " CAST(? AS TIMESTAMP) AS created_at"
+                    + " FROM rdb$database) src"
+                    + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
+                    + " WHEN NOT MATCHED THEN INSERT"
+                    + " (owner_id, post_id, author_id, created_at)"
+                    + " VALUES (src.owner_id, src.post_id, src.author_id,"
+                    + " src.created_at)";
+
+    /** То же самое, но владельцами становятся все подписчики автора. */
+    private static final String MERGE_FOLLOWERS =
+            "MERGE INTO feed_entries fe USING ("
+                    + " SELECT s.follower_id AS owner_id,"
+                    + " CAST(? AS VARCHAR(40)) AS post_id,"
+                    + " CAST(? AS VARCHAR(40)) AS author_id,"
+                    + " CAST(? AS TIMESTAMP) AS created_at"
+                    + " FROM feed_subscriptions s WHERE s.target_id = ?) src"
+                    + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
+                    + " WHEN NOT MATCHED THEN INSERT"
+                    + " (owner_id, post_id, author_id, created_at)"
+                    + " VALUES (src.owner_id, src.post_id, src.author_id,"
+                    + " src.created_at)";
+
+    private final Enrichment enrichment;
+
+    public FeedProjection(Enrichment enrichment) {
+        this.enrichment = enrichment;
+    }
+
     @Override
     public void handle(Connection c, OutboxRecord record) throws Exception {
         String type = record.getType();
@@ -114,9 +155,14 @@ public final class FeedProjection implements OutboxDrainer.Handler {
     /**
      * Пост создан: строка в ленту автора и каждого его подписчика.
      *
-     * <p>Одним запросом, а не выборкой подписчиков в память и вставкой по
-     * одному: подписчиков может быть много, и круг к базе на каждого
+     * <p>Подписчики раскладываются одним запросом, а не выборкой в память
+     * и вставкой по одному: их может быть много, и круг к базе на каждого
      * превратил бы один пост в тысячу обменов.
+     *
+     * <p><b>Пост, которого уже нет, — не отказ.</b> Между созданием и
+     * дренажом его могли удалить, и {@code NotFound} тут означает
+     * «раскладывать нечего», а не «что-то сломалось». Считать это отказом
+     * значило бы держать в очереди событие, которое не пройдёт никогда.
      */
     private void onPostCreated(Connection c, OutboxRecord record)
             throws Exception {
@@ -127,38 +173,30 @@ public final class FeedProjection implements OutboxDrainer.Handler {
                     "в post.created нет authorId: раскладывать пост некому");
         }
 
+        PostView view;
+        try {
+            view = enrichment.loadPost(postId);
+        } catch (NotFound gone) {
+            log.info("пост {} исчез до раскладки: класть нечего", postId);
+            return;
+        }
+        Timestamp createdAt = new Timestamp(view.createdAtMillis);
+
         // Автор видит свой пост в своей ленте.
-        try (PreparedStatement ps = c.prepareStatement(
-                "MERGE INTO feed_entries fe USING ("
-                        + " SELECT CAST(? AS VARCHAR(40)) AS owner_id,"
-                        + " p.id AS post_id, p.author_id, p.created_at"
-                        + " FROM posts p"
-                        + " WHERE p.id = ? AND p.status = 'VISIBLE') src"
-                        + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
-                        + " WHEN NOT MATCHED THEN INSERT"
-                        + " (owner_id, post_id, author_id, created_at)"
-                        + " VALUES (src.owner_id, src.post_id, src.author_id, src.created_at)")) {
+        try (PreparedStatement ps = c.prepareStatement(MERGE_ONE)) {
             ps.setString(1, authorId);
             ps.setString(2, postId);
+            ps.setString(3, authorId);
+            ps.setTimestamp(4, createdAt);
             ps.executeUpdate();
         }
 
-        // И каждый, кто на него подписан. Подписки берутся из СВОЕЙ
-        // проекции, а не из таблицы follows: та принадлежит core, а
-        // events строит проекции только на том, чем владеет сам
-        // (ADR-0016).
-        try (PreparedStatement ps = c.prepareStatement(
-                "MERGE INTO feed_entries fe USING ("
-                        + " SELECT s.follower_id AS owner_id,"
-                        + " p.id AS post_id, p.author_id, p.created_at"
-                        + " FROM posts p"
-                        + " JOIN feed_subscriptions s ON s.target_id = p.author_id"
-                        + " WHERE p.id = ? AND p.status = 'VISIBLE') src"
-                        + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
-                        + " WHEN NOT MATCHED THEN INSERT"
-                        + " (owner_id, post_id, author_id, created_at)"
-                        + " VALUES (src.owner_id, src.post_id, src.author_id, src.created_at)")) {
+        // И каждый, кто на него подписан.
+        try (PreparedStatement ps = c.prepareStatement(MERGE_FOLLOWERS)) {
             ps.setString(1, postId);
+            ps.setString(2, authorId);
+            ps.setTimestamp(3, createdAt);
+            ps.setString(4, authorId);
             ps.executeUpdate();
         }
     }
@@ -174,10 +212,10 @@ public final class FeedProjection implements OutboxDrainer.Handler {
     }
 
     /**
-     * Подписка заведена: в ленту подписчика попадают недавние посты того,
-     * на кого подписались.
+     * Подписка заведена: строка в графе и недавние посты в ленту.
      *
-     * <p>Без этого лента наполнялась бы только новыми постами и после
+     * <p>Сперва граф — им фанаут будет пользоваться дальше. Дотягивание
+     * прежних постов следствие, а не причина: без него лента после
      * подписки выглядела бы пустой, пока автор не напишет следующий.
      */
     private void onFollowCreated(Connection c, OutboxRecord record)
@@ -189,8 +227,6 @@ public final class FeedProjection implements OutboxDrainer.Handler {
                     "в follow.created нет targetUserId: дотягивать нечего");
         }
 
-        // Сперва граф: он и есть то, чем фанаут будет пользоваться
-        // дальше. Дотягивание прежних постов — следствие, а не причина.
         try (PreparedStatement ps = c.prepareStatement(
                 "MERGE INTO feed_subscriptions s USING ("
                         + " SELECT CAST(? AS VARCHAR(40)) AS follower_id,"
@@ -207,29 +243,29 @@ public final class FeedProjection implements OutboxDrainer.Handler {
             ps.executeUpdate();
         }
 
-        try (PreparedStatement ps = c.prepareStatement(
-                "MERGE INTO feed_entries fe USING ("
-                        + " SELECT CAST(? AS VARCHAR(40)) AS owner_id,"
-                        + " p.id AS post_id, p.author_id, p.created_at"
-                        + " FROM posts p"
-                        + " WHERE p.author_id = ? AND p.status = 'VISIBLE'"
-                        + " ORDER BY p.created_at DESC, p.id DESC"
-                        + " ROWS " + BACKFILL_LIMIT + ") src"
-                        + " ON (fe.owner_id = src.owner_id AND fe.post_id = src.post_id)"
-                        + " WHEN NOT MATCHED THEN INSERT"
-                        + " (owner_id, post_id, author_id, created_at)"
-                        + " VALUES (src.owner_id, src.post_id, src.author_id, src.created_at)")) {
-            ps.setString(1, followerId);
-            ps.setString(2, targetId);
-            ps.executeUpdate();
+        PostView[] recent = enrichment.recentPostsBy(targetId, BACKFILL_LIMIT);
+        if (recent.length == 0) {
+            return;
+        }
+        // Пачкой, а не по одному: круг к базе на каждый пост превратил бы
+        // одну подписку в двести обменов.
+        try (PreparedStatement ps = c.prepareStatement(MERGE_ONE)) {
+            for (PostView view : recent) {
+                ps.setString(1, followerId);
+                ps.setString(2, view.postId);
+                ps.setString(3, targetId);
+                ps.setTimestamp(4, new Timestamp(view.createdAtMillis));
+                ps.addBatch();
+            }
+            ps.executeBatch();
         }
     }
 
     /**
-     * Подписка снята: из ленты подписчика уходят посты этого автора.
+     * Подписка снята: уходит и строка графа, и посты этого автора.
      *
-     * <p>Снимается по паре (владелец, автор), а не соединением с
-     * {@code posts}: автор записан в строке ленты именно для этого.
+     * <p>Снимается по паре (владелец, автор), а не соединением с постами:
+     * автор записан в строке ленты именно для этого.
      */
     private void onFollowRemoved(Connection c, OutboxRecord record)
             throws Exception {

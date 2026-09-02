@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import sonder.enrichment.Enrichment;
 import sonder.shell.app.ConnectionSource;
 import sonder.shell.projection.FeedProjection;
 import sonder.shell.stream.FeedStream;
@@ -45,12 +46,13 @@ public class OutboxSchedule {
     @Bean
     public OutboxDrainer outboxDrainer(DataSource dataSource,
                                        FeedStream stream,
+                                       Enrichment enrichment,
                                        @Value("${sonder.outbox.batch:32}") int batch) {
         ConnectionSource connections = dataSource::getConnection;
         // Проекция пишет В транзакцию, поток рассылает ПОСЛЕ коммита.
         // Порядок задан здесь и только здесь — так требует контракт
         // операции subscribe.
-        return new OutboxDrainer(connections, new FeedProjection(),
+        return new OutboxDrainer(connections, new FeedProjection(enrichment),
                 new Backoff(), batch, stream);
     }
 

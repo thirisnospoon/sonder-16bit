@@ -1,5 +1,6 @@
 package sonder.store;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -9,6 +10,9 @@ import sonder.shell.outbox.Outbox;
 import sonder.shell.outbox.OutboxDrainer;
 import sonder.shell.outbox.OutboxEvent;
 import sonder.shell.outbox.OutboxRecord;
+import sonder.shell.enrichment.EnrichmentClient;
+import sonder.shell.enrichment.EnrichmentServant;
+import sonder.shell.enrichment.EnrichmentServer;
 import sonder.shell.projection.FeedProjection;
 
 import java.sql.Connection;
@@ -70,9 +74,26 @@ class FeedStreamIT extends FirebirdSupport {
 
     private Spy spy;
 
+    private static EnrichmentServer server;
+    private static EnrichmentClient client;
+
     @BeforeAll
     static void migrate() throws Exception {
         prepareDatabase();
+        server = EnrichmentServer.start(
+                new EnrichmentServant(FirebirdSupport::connect),
+                "127.0.0.1", 0, null);
+        client = EnrichmentClient.connect(server.getIor());
+    }
+
+    @AfterAll
+    static void stopEnrichment() {
+        if (client != null) {
+            client.close();
+        }
+        if (server != null) {
+            server.close();
+        }
     }
 
     @BeforeEach
@@ -122,7 +143,7 @@ class FeedStreamIT extends FirebirdSupport {
     void notifiedAfterCommit() throws Exception {
         enqueue("p-1", "post.created", "{\"authorId\":\"u-1\"}");
 
-        drainer(new FeedProjection()).drainOnce(T0);
+        drainer(new FeedProjection(client.service())).drainOnce(T0);
 
         assertEquals(java.util.Arrays.asList("post.created:p-1"), spy.seen,
                 "рассылка получила не то");
@@ -151,7 +172,7 @@ class FeedStreamIT extends FirebirdSupport {
     @Test
     @DisplayName("пустой круг рассылку не зовёт")
     void emptyRoundIsQuiet() throws Exception {
-        drainer(new FeedProjection()).drainOnce(T0);
+        drainer(new FeedProjection(client.service())).drainOnce(T0);
 
         assertEquals(-1, spy.feedRowsAtCall, "рассылка позвана впустую");
         assertTrue(spy.seen.isEmpty());
@@ -168,7 +189,7 @@ class FeedStreamIT extends FirebirdSupport {
         spy.throwThis = new IllegalStateException("соединение оборвалось");
         enqueue("p-1", "post.created", "{\"authorId\":\"u-1\"}");
 
-        OutboxDrainer.Result r = drainer(new FeedProjection()).drainOnce(T0);
+        OutboxDrainer.Result r = drainer(new FeedProjection(client.service())).drainOnce(T0);
 
         assertEquals(1, r.getPublished(), "отказ рассылки сорвал публикацию");
         try (Connection c = connect()) {
