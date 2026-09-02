@@ -46,9 +46,9 @@ class RestContractTest {
      * список означает, что оболочка сдержала контракт целиком.
      */
     private static final Set<String> PENDING = new LinkedHashSet<>(java.util.Arrays.asList(
-            // getFeed и subscribe ждут фазы 7: лента строится проекцией
-            // из событий, а подписка на события — их фанаутом.
-            "getFeed",
+            // subscribe ждёт SSE: сама лента уже строится проекцией из
+            // событий, а вот доставка изменений в открытое соединение —
+            // отдельная работа фазы 7.
             "subscribe"));
 
     /** Пара «метод, путь» в том виде, в каком её объявляют обе стороны. */
@@ -187,7 +187,7 @@ class RestContractTest {
     @Test
     @DisplayName("отложенного не больше, чем было зафиксировано")
     void pendingDoesNotGrow() {
-        assertTrue(PENDING.size() <= 2,
+        assertTrue(PENDING.size() <= 1,
                 "список отложенного вырос до " + PENDING.size()
                         + ": контракт обещает больше, чем оболочка делает");
     }
