@@ -13,6 +13,11 @@
 # число раундов, отрабатывает их и выходит. Срок держит этот скрипт, меняя
 # семя от прогона к прогону.
 #
+# Без --seed прогон продолжает журнал soak-log.tsv, а не начинается с
+# единицы: иначе каждый следующий запуск повторял бы уже проверенные
+# случаи, копя часы вместо покрытия. Сколько накоплено — ./sonder
+# soak-total.
+#
 # Так падение на восемнадцатом часу воспроизводится одной командой с тем же
 # семенем, а не «попробуй ещё сутки». Ровно та же причина, по которой в
 # tstfuzz свой генератор, а не Random из RTL.
@@ -34,7 +39,59 @@ SECONDS_TOTAL=60
 TARGET=native
 ROUNDS=200000
 SEED=1
+SEED_MODE=auto
 SELFTEST=0
+
+# Журнал прогонов. Гейт Ф5 требует суток накопленного фаззинга, а «сутки
+# накоплено» — утверждение, которое нужно чем-то подкрепить: сколько
+# прогонов, с какими семенами, с каким исходом. Без записи повторный
+# запуск к тому же молча гонял бы ровно те же случаи и время копил, а
+# покрытие — нет.
+LEDGER="$ROOT/dosnode/fuzz/soak-log.tsv"
+
+# Следующее непройденное семя: на единицу больше самого большого
+# записанного. Пространство семян ОБЩЕЕ для таргетов, а не своё у
+# каждого. Так оно и использовалось (нативно 1..250, затем под DOSBox
+# 251..434), и так два таргета не гоняют молча один и тот же вход,
+# называя это независимым накоплением.
+ledger_next_seed() {
+  local max=0 d t s r from to rest
+  [ -f "$LEDGER" ] || { echo 1; return; }
+  while IFS=$'\t' read -r d t s r from to rest; do
+    case "$d" in '#'*) continue ;; esac
+    case "$to" in ''|*[!0-9]*) continue ;; esac
+    [ "$to" -gt "$max" ] && max="$to"
+  done < "$LEDGER"
+  echo $(( max + 1 ))
+}
+
+# Как часто откладывать накопленное в журнал. Прогон на несколько часов,
+# записывающий итог только в конце, теряет ВСЁ, если его прервали на
+# последней минуте, — а прерывают именно долгие. Отсюда контрольные
+# точки: потерять можно не больше десяти минут.
+# Через переменную окружения, чтобы проверять саму отсрочку не десятью
+# минутами ожидания: механизм, который нельзя завести на глазах, не
+# проверен, а понадеян.
+CHECKPOINT="${SOAK_CHECKPOINT:-600}"
+
+# Строка журнала: секунды, прогоны, семена от и до, четыре счётчика, исход.
+ledger_append() {
+  [ "$SELFTEST" -eq 0 ] || return 0
+  # Пустой отрезок не пишется, но НАРУШЕНИЕ пишется всегда, даже если
+  # упал первый же прогон и считать нечего. Журнал без провалов —
+  # журнал, ради которого не стоило заводиться.
+  [ "$2" -gt 0 ] || [ "$9" != "чисто" ] || return 0
+  if [ ! -f "$LEDGER" ]; then
+    printf '%s\n' \
+      '# Журнал долгих прогонов фаззера. Пишет soak.sh, сводка —' \
+      '# ./sonder soak-total. Пространство семян общее для таргетов.' \
+      '# когда	таргет	секунд	прогонов	от	до	xml_ok	xml_bad	frame_ok	frame_corrupt	исход' \
+      > "$LEDGER"
+  fi
+  printf '%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET" \
+    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" >> "$LEDGER"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,7 +100,7 @@ while [ $# -gt 0 ]; do
     --seconds) SECONDS_TOTAL="$2"; shift 2 ;;
     --target)  TARGET="$2"; shift 2 ;;
     --rounds)  ROUNDS="$2"; shift 2 ;;
-    --seed)    SEED="$2"; shift 2 ;;
+    --seed)    SEED="$2"; SEED_MODE=fixed; shift 2 ;;
     --selftest) SELFTEST=1; shift ;;
     *) echo "неизвестный аргумент: $1" >&2; exit 64 ;;
   esac
@@ -54,9 +111,21 @@ case "$TARGET" in
   *) echo "неизвестный таргет: $TARGET" >&2; exit 64 ;;
 esac
 
+# Семя по умолчанию продолжает журнал, а не начинается с единицы: иначе
+# каждый следующий прогон повторял бы уже проверенные случаи и копил
+# часы вместо покрытия. Явное --seed остаётся для воспроизведения.
+if [ "$SEED_MODE" = auto ]; then
+  SEED="$(ledger_next_seed)"
+fi
+
 # Предел на один прогон. Он должен быть заметно больше ожидаемого времени
 # прогона, но конечным: иначе зависание не отличить от долгой работы.
-PER_RUN_TIMEOUT=600
+#
+# Через переменную окружения по той же причине, что и CHECKPOINT: ветка
+# «зависание» опаснее прочих (цикл, переставший возвращать управление,
+# снаружи выглядит как «просто медленно»), и завести её на глазах должно
+# быть можно, не дожидаясь настоящего зависания.
+PER_RUN_TIMEOUT="${SOAK_RUN_TIMEOUT:-600}"
 
 echo "=============================================="
 echo " Долгий прогон фаззеров"
@@ -70,10 +139,10 @@ echo
 BIN=""
 if [ "$TARGET" = native ]; then
   BIN="$(bash "$ROOT/dosnode/build/build.sh" --target native \
-         --main "$HERE/soak.pas" --out soak)" || exit 1
+         --main "$HERE/soak.pas" --out soak --outdir soak)" || exit 1
 else
   BIN="$(bash "$ROOT/dosnode/build/build.sh" --target msdos \
-         --main "$HERE/soak.pas" --out SOAK)" || exit 1
+         --main "$HERE/soak.pas" --out SOAK --outdir soak)" || exit 1
   command -v dosbox >/dev/null 2>&1 || { echo "dosbox не установлен" >&2; exit 64; }
 fi
 
@@ -88,6 +157,10 @@ rc=0
 # Итоги складываются по всем прогонам: одна строка в конце важнее
 # километра промежуточных.
 tot_xml_ok=0; tot_xml_bad=0; tot_frame_ok=0; tot_frame_corrupt=0
+
+# То же самое, но с последней контрольной точки: это и уходит в журнал.
+ck_start=$started; ck_runs=0; ck_seed_from=$SEED
+ck_xml_ok=0; ck_xml_bad=0; ck_frame_ok=0; ck_frame_corrupt=0
 
 run_native() {
   local extra=""
@@ -171,15 +244,31 @@ while :; do
   fi
   for kv in $line; do
     case "$kv" in
-      xml_ok=*)        tot_xml_ok=$(( tot_xml_ok + ${kv#*=} )) ;;
-      xml_bad=*)       tot_xml_bad=$(( tot_xml_bad + ${kv#*=} )) ;;
-      frame_ok=*)      tot_frame_ok=$(( tot_frame_ok + ${kv#*=} )) ;;
-      frame_corrupt=*) tot_frame_corrupt=$(( tot_frame_corrupt + ${kv#*=} )) ;;
+      xml_ok=*)        tot_xml_ok=$(( tot_xml_ok + ${kv#*=} ))
+                       ck_xml_ok=$(( ck_xml_ok + ${kv#*=} )) ;;
+      xml_bad=*)       tot_xml_bad=$(( tot_xml_bad + ${kv#*=} ))
+                       ck_xml_bad=$(( ck_xml_bad + ${kv#*=} )) ;;
+      frame_ok=*)      tot_frame_ok=$(( tot_frame_ok + ${kv#*=} ))
+                       ck_frame_ok=$(( ck_frame_ok + ${kv#*=} )) ;;
+      frame_corrupt=*) tot_frame_corrupt=$(( tot_frame_corrupt + ${kv#*=} ))
+                       ck_frame_corrupt=$(( ck_frame_corrupt + ${kv#*=} )) ;;
     esac
   done
 
   runs=$(( runs + 1 ))
+  ck_runs=$(( ck_runs + 1 ))
   seed=$(( seed + 1 ))
+
+  # Контрольная точка: накопленное с прошлой уходит в журнал, счётчики
+  # обнуляются. Прерванный прогон теряет только текущий отрезок.
+  ck_elapsed=$(( $(date +%s) - ck_start ))
+  if [ "$ck_elapsed" -ge "$CHECKPOINT" ]; then
+    ledger_append "$ck_elapsed" "$ck_runs" "$ck_seed_from" "$(( seed - 1 ))" \
+      "$ck_xml_ok" "$ck_xml_bad" "$ck_frame_ok" "$ck_frame_corrupt" "чисто"
+    echo "  ... отложено в журнал: ${ck_elapsed} с, семена ${ck_seed_from}..$(( seed - 1 ))"
+    ck_start=$(date +%s); ck_runs=0; ck_seed_from=$seed
+    ck_xml_ok=0; ck_xml_bad=0; ck_frame_ok=0; ck_frame_corrupt=0
+  fi
 
   # Признак жизни примерно раз в минуту, а не на каждый прогон.
   if [ $(( runs % 50 )) -eq 0 ]; then
@@ -202,4 +291,22 @@ if [ "$rc" -eq 0 ]; then
 else
   echo "ЕСТЬ НАРУШЕНИЯ — воспроизводится: soak $seed $ROUNDS"
 fi
+
+# Остаток с последней контрольной точки. Нарушение записывается тоже, и
+# именно с настоящим исходом: строка «НАРУШЕНИЕ» в журнале — это то, ради
+# чего он и заводился. Самопроверка не записывается: она проваливается
+# намеренно, и её строка испортила бы и сумму часов, и перечень семян.
+# В исходе называется упавшее семя: строка «НАРУШЕНИЕ:470» говорит, чем
+# воспроизводить, а диапазон «от 470 до 469» остаётся честным — отрезок
+# не довёл до конца ни одного семени, и следующий запуск начнётся именно
+# с упавшего, а не за ним.
+verdict=$([ "$rc" -eq 0 ] && echo "чисто" || echo "НАРУШЕНИЕ:$seed")
+if ledger_append "$(( $(date +%s) - ck_start ))" "$ck_runs" \
+     "$ck_seed_from" "$(( seed - 1 ))" \
+     "$ck_xml_ok" "$ck_xml_bad" "$ck_frame_ok" "$ck_frame_corrupt" \
+     "$verdict"; then
+  [ "$SELFTEST" -eq 0 ] && [ "$ck_runs" -gt 0 ] \
+    && echo "записано в dosnode/fuzz/soak-log.tsv"
+fi
+
 exit "$rc"

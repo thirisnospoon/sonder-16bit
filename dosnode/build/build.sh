@@ -18,6 +18,11 @@ TARGET=""
 MAIN=""
 OUTNAME=""
 MODEL="${MODEL:-large}"
+# Свой каталог сборки на случай, когда компиляций идёт две сразу. Каталог
+# у FPC служит и для единиц (-FU), и потому общий на два процесса означает
+# гонку за .ppu, а не просто соседство файлов. Долгий фаззинг живёт часами
+# и обязан уживаться с обычным прогоном тестов.
+OUTSUFFIX=""
 EXTRA=()
 
 while [ $# -gt 0 ]; do
@@ -26,6 +31,7 @@ while [ $# -gt 0 ]; do
     --main)   MAIN="$2";   shift 2 ;;
     --out)    OUTNAME="$2"; shift 2 ;;
     --model)  MODEL="$2";  shift 2 ;;
+    --outdir) OUTSUFFIX="$2"; shift 2 ;;
     *)        EXTRA+=("$1"); shift ;;
   esac
 done
@@ -37,7 +43,7 @@ done
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SRC="$ROOT/dosnode/src"
-OUT="$HERE/out/$TARGET"
+OUT="$HERE/out/$TARGET${OUTSUFFIX:+-$OUTSUFFIX}"
 
 mkdir -p "$OUT"
 

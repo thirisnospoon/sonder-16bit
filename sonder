@@ -270,6 +270,44 @@ cmd_soak() {
   fi
 }
 
+# Сколько накоплено фаззинга. Гейт Ф5 требует суток, и «примерно
+# столько-то» тут не годится: сумма берётся из журнала, куда soak.sh
+# пишет каждый свой прогон.
+cmd_soak_total() {
+  local ledger="$ROOT/dosnode/fuzz/soak-log.tsv"
+  step "накопленный фаззинг"
+  if [ ! -f "$ledger" ]; then
+    echo "    журнала нет: ни одного прогона не записано"
+    return 1
+  fi
+  awk -F '\t' '
+    /^#/ { next }
+    NF < 11 { next }
+    {
+      secs[$2] += $3; runs[$2] += $4;
+      if ($6 > last[$2]) last[$2] = $6;
+      total += $3; totalRuns += $4;
+      if ($11 != "чисто") violations++;
+      xml += $7 + $8; frames += $9;
+    }
+    END {
+      for (t in secs)
+        printf("    %-7s %6.2f ч, прогонов %d, семена пройдены до %d\n",
+               t, secs[t] / 3600, runs[t], last[t]);
+      printf("    ------\n");
+      printf("    всего   %6.2f ч из 24, это %.1f%%\n",
+             total / 3600, total / 864);
+      printf("    прогонов %d, XML разобрано %d, кадров сверено %d\n",
+             totalRuns, xml, frames);
+      if (violations > 0)
+        printf("    НАРУШЕНИЙ: %d — гейт не берётся\n", violations);
+      else
+        printf("    нарушений нет\n");
+      exit (violations > 0) ? 1 : 0;
+    }
+  ' "$ledger"
+}
+
 cmd_clean() {
   rm -rf spikes/*/out
   echo "сборочные артефакты удалены"
@@ -287,6 +325,7 @@ Sonder — цели
   contracts-selftest   убедиться, что валидатор ловит дефекты
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
+  soak-total           сколько накоплено фаззинга из требуемых суток
   check-generated      собрать и прогнать сгенерированный Pascal
   test                 тесты TurboCore на обоих таргетах
   test-native          только нативный таргет, доли секунды
@@ -317,6 +356,7 @@ case "${1:-help}" in
   test-native)        need_docker; cmd_test_native ;;
   spikes)             cmd_spikes ;;
   soak)               shift; need_docker; cmd_soak "$@" ;;
+  soak-total)         cmd_soak_total ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
   clean)              cmd_clean ;;
