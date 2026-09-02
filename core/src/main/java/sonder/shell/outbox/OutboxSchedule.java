@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import sonder.shell.app.ConnectionSource;
 import sonder.shell.projection.FeedProjection;
+import sonder.shell.stream.FeedStream;
 
 import javax.sql.DataSource;
 import java.time.Instant;
@@ -45,10 +46,14 @@ public class OutboxSchedule {
 
     @Bean
     public OutboxDrainer outboxDrainer(DataSource dataSource,
+                                       FeedStream stream,
                                        @Value("${sonder.outbox.batch:32}") int batch) {
         ConnectionSource connections = dataSource::getConnection;
+        // Проекция пишет В транзакцию, поток рассылает ПОСЛЕ коммита.
+        // Порядок задан здесь и только здесь — так требует контракт
+        // операции subscribe.
         return new OutboxDrainer(connections, new FeedProjection(),
-                new Backoff(), batch);
+                new Backoff(), batch, stream);
     }
 
     @Bean

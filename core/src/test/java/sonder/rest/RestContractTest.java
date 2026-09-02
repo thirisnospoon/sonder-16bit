@@ -45,11 +45,8 @@ class RestContractTest {
      * <p>Каждая строка — обещание, за которое кто-то отвечает. Пустой
      * список означает, что оболочка сдержала контракт целиком.
      */
-    private static final Set<String> PENDING = new LinkedHashSet<>(java.util.Arrays.asList(
-            // subscribe ждёт SSE: сама лента уже строится проекцией из
-            // событий, а вот доставка изменений в открытое соединение —
-            // отдельная работа фазы 7.
-            "subscribe"));
+    private static final Set<String> PENDING =
+            new LinkedHashSet<>(java.util.Collections.<String>emptyList());
 
     /** Пара «метод, путь» в том виде, в каком её объявляют обе стороны. */
     private static String route(String method, String path) {
@@ -118,12 +115,30 @@ class RestContractTest {
         }
     }
 
+    /**
+     * Путь из аннотации.
+     *
+     * <p>Читаются ОБА псевдонима, {@code value} и {@code path}: в Spring
+     * они означают одно и то же, и выбор между ними — дело вкуса автора
+     * контроллера. Проверка, знающая только один, объявляла бы маршрут
+     * нереализованным по тому лишь признаку, что его записали иначе. Так
+     * и вышло с {@code GET /events}, и разбираться пришлось не с
+     * маршрутом, а с проверкой.
+     */
     private static String[] pathsOf(Object annotation) {
+        String[] value = arrayField(annotation, "value");
+        if (value.length > 0) {
+            return value;
+        }
+        return arrayField(annotation, "path");
+    }
+
+    private static String[] arrayField(Object annotation, String name) {
         try {
-            Object value = annotation.getClass().getMethod("value").invoke(annotation);
-            return (String[]) value;
+            return (String[]) annotation.getClass().getMethod(name).invoke(annotation);
         } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("не прочитать путь из аннотации", e);
+            throw new IllegalStateException(
+                    "не прочитать " + name + " из аннотации", e);
         }
     }
 
@@ -187,7 +202,7 @@ class RestContractTest {
     @Test
     @DisplayName("отложенного не больше, чем было зафиксировано")
     void pendingDoesNotGrow() {
-        assertTrue(PENDING.size() <= 1,
+        assertTrue(PENDING.size() <= 0,
                 "список отложенного вырос до " + PENDING.size()
                         + ": контракт обещает больше, чем оболочка делает");
     }
