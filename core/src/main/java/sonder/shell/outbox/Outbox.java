@@ -74,15 +74,27 @@ public final class Outbox {
      *
      * <p>Порядок по {@code id}, а не по времени создания: часы могут
      * сдвинуться, а идентичность — нет.
+     *
+     * <p>Строки, у которых отсрочка повтора ещё не истекла, не выдаются.
+     * {@code NULL} в {@code next_attempt_at} значит «выдавать сейчас»: так
+     * выглядит и всякая новая строка, и всякая, записанная до появления
+     * отсрочки.
+     *
+     * <p>Время параметром, а не {@code Instant.now()} внутри: очередь с
+     * собственными часами проверяется только ожиданием, а ожидание в
+     * тесте — это не проверка, а надежда.
      */
-    public static List<OutboxRecord> claim(Connection c, int batch) throws SQLException {
+    public static List<OutboxRecord> claim(Connection c, int batch, Instant now)
+            throws SQLException {
         List<OutboxRecord> out = new ArrayList<>();
         String sql = "SELECT id, aggregate_id, event_type, payload, trace_id, attempts"
                 + " FROM outbox WHERE published_at IS NULL"
+                + " AND (next_attempt_at IS NULL OR next_attempt_at <= ?)"
                 + " ORDER BY id ROWS " + batch
                 + " FOR UPDATE WITH LOCK SKIP LOCKED";
-        try (PreparedStatement ps = c.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(now));
+            ResultSet rs = ps.executeQuery();
             while (rs.next()) {
                 out.add(new OutboxRecord(
                         rs.getLong(1),
@@ -97,10 +109,11 @@ public final class Outbox {
     }
 
     /** Событие опубликовано: больше его не выдавать. */
-    public static void markPublished(Connection c, long id) throws SQLException {
+    public static void markPublished(Connection c, long id, Instant now)
+            throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
                 "UPDATE outbox SET published_at = ? WHERE id = ?")) {
-            ps.setTimestamp(1, Timestamp.from(Instant.now()));
+            ps.setTimestamp(1, Timestamp.from(now));
             ps.setLong(2, id);
             ps.executeUpdate();
         }
@@ -108,17 +121,24 @@ public final class Outbox {
 
     /**
      * Публикация не удалась. Счётчик попыток растёт, строка остаётся
-     * неопубликованной.
+     * неопубликованной и не выдаётся до {@code notBefore}.
      *
      * <p>Считать попытки нужно затем, чтобы ядовитое событие было ВИДНО, а
      * не крутилось в очереди вечно, тихо съедая пропускную способность.
      * Решение, что делать с таким событием, принимает человек по метрике, а
      * не код по порогу: автоматическое отбрасывание теряет данные молча.
+     *
+     * <p>Насколько отложить — решает не очередь, а {@link Backoff} в
+     * дренажёре: здесь только запись срока. Политика в примитиве хранения
+     * означала бы, что её нельзя ни подменить, ни проверить отдельно.
      */
-    public static void recordFailure(Connection c, long id) throws SQLException {
+    public static void recordFailure(Connection c, long id, Instant notBefore)
+            throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
-                "UPDATE outbox SET attempts = attempts + 1 WHERE id = ?")) {
-            ps.setLong(1, id);
+                "UPDATE outbox SET attempts = attempts + 1, next_attempt_at = ?"
+                        + " WHERE id = ?")) {
+            ps.setTimestamp(1, Timestamp.from(notBefore));
+            ps.setLong(2, id);
             ps.executeUpdate();
         }
     }

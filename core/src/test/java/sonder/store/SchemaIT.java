@@ -11,8 +11,12 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -181,5 +185,51 @@ class SchemaIT extends FirebirdSupport {
             assertEquals("post.created", rs.getString(2));
             assertNotNull(rs.getString(3));
         }
+    }
+
+    /**
+     * Механическая проверка: {@link FirebirdSupport#TABLES} знает про
+     * каждую таблицу схемы.
+     *
+     * <p>Таблицы чистятся между тестами по этому списку. Забытая в нём
+     * таблица не мешает до тех пор, пока в неё никто не пишет, — а потом
+     * ломает СОСЕДНИЙ класс тестов внешним ключом, и разбираться там
+     * будут с чем угодно, только не со списком. Так уже вышло, когда
+     * дренаж очереди начал писать комментарии.
+     */
+    @Test
+    @DisplayName("список для очистки знает про каждую таблицу схемы")
+    void wipeCoversEverySchemaTable() throws Exception {
+        Set<String> inDatabase = new TreeSet<>();
+        try (Connection c = connect();
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT TRIM(RDB$RELATION_NAME) FROM RDB$RELATIONS"
+                             + " WHERE COALESCE(RDB$SYSTEM_FLAG, 0) = 0"
+                             + " AND RDB$VIEW_BLR IS NULL")) {
+            while (rs.next()) {
+                inDatabase.add(rs.getString(1).toLowerCase(Locale.ROOT));
+            }
+        }
+        // Своей таблицей управляет Flyway, и чистить её нельзя: без неё
+        // миграции пойдут заново.
+        inDatabase.remove("flyway_schema_history");
+
+        assertFalse(inDatabase.isEmpty(),
+                "в базе не нашлось ни одной таблицы — проверка была бы пустой");
+
+        Set<String> known = new TreeSet<>(FirebirdSupport.TABLES);
+
+        Set<String> forgotten = new TreeSet<>(inDatabase);
+        forgotten.removeAll(known);
+        assertTrue(forgotten.isEmpty(),
+                "таблица есть в схеме, но не чистится между тестами: " + forgotten
+                        + ". Данные потекут из класса в класс, и сломается "
+                        + "не тот, кто их оставил");
+
+        Set<String> phantom = new TreeSet<>(known);
+        phantom.removeAll(inDatabase);
+        assertTrue(phantom.isEmpty(),
+                "чистится таблица, которой в схеме нет: " + phantom);
     }
 }

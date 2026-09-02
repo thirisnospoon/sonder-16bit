@@ -42,6 +42,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class OutboxIT extends FirebirdSupport {
 
+    /**
+     * Время, от которого считает очередь. Здесь оно неподвижно: этот
+     * модуль проверяет примитивы хранения, а отсрочку повтора — дренажёр
+     * в {@link OutboxDrainerIT}, и там время двигают намеренно.
+     */
+    private static final Instant NOW = Instant.parse("2026-09-02T10:00:00Z");
+
+    /** Срок в прошлом: строка снова доступна сразу. */
+    private static final Instant PAST = NOW.minusSeconds(1);
+
     @BeforeAll
     static void migrate() throws Exception {
         prepareDatabase();
@@ -49,10 +59,8 @@ class OutboxIT extends FirebirdSupport {
 
     @BeforeEach
     void clean() throws Exception {
-        try (Connection c = connect(); Statement st = c.createStatement()) {
-            st.executeUpdate("DELETE FROM outbox");
-            st.executeUpdate("DELETE FROM posts");
-            st.executeUpdate("DELETE FROM users");
+        try (Connection c = connect()) {
+            wipe(c);
         }
     }
 
@@ -135,18 +143,18 @@ class OutboxIT extends FirebirdSupport {
         long id;
         try (Connection c = connect()) {
             c.setAutoCommit(false);
-            List<OutboxRecord> batch = Outbox.claim(c, Outbox.DEFAULT_BATCH);
+            List<OutboxRecord> batch = Outbox.claim(c, Outbox.DEFAULT_BATCH, NOW);
             assertEquals(1, batch.size(), "не выдалась единственная строка");
             id = batch.get(0).getId();
             assertTrue(id > 0, "идентификатор не выдан базой");
             assertEquals("user.registered", batch.get(0).getType());
-            Outbox.markPublished(c, id);
+            Outbox.markPublished(c, id, NOW);
             c.commit();
         }
 
         try (Connection c = connect()) {
             c.setAutoCommit(false);
-            assertTrue(Outbox.claim(c, Outbox.DEFAULT_BATCH).isEmpty(),
+            assertTrue(Outbox.claim(c, Outbox.DEFAULT_BATCH, NOW).isEmpty(),
                     "опубликованная строка выдалась снова");
             assertEquals(0, Outbox.pendingCount(c));
             c.commit();
@@ -166,14 +174,16 @@ class OutboxIT extends FirebirdSupport {
         long id;
         try (Connection c = connect()) {
             c.setAutoCommit(false);
-            id = Outbox.claim(c, 1).get(0).getId();
-            Outbox.recordFailure(c, id);
+            id = Outbox.claim(c, 1, NOW).get(0).getId();
+            // Срок в прошлом: здесь проверяется, что строка не выпала из
+            // очереди, а не отсрочка — она в OutboxDrainerIT.
+            Outbox.recordFailure(c, id, PAST);
             c.commit();
         }
 
         try (Connection c = connect()) {
             c.setAutoCommit(false);
-            List<OutboxRecord> again = Outbox.claim(c, 1);
+            List<OutboxRecord> again = Outbox.claim(c, 1, NOW);
             assertEquals(1, again.size(), "строка выпала из очереди после неудачи");
             assertEquals(1, again.get(0).getAttempts(), "попытка не посчиталась");
             c.commit();
@@ -205,8 +215,8 @@ class OutboxIT extends FirebirdSupport {
             first.setAutoCommit(false);
             second.setAutoCommit(false);
 
-            List<OutboxRecord> a = Outbox.claim(first, 4);
-            List<OutboxRecord> b = Outbox.claim(second, 4);
+            List<OutboxRecord> a = Outbox.claim(first, 4, NOW);
+            List<OutboxRecord> b = Outbox.claim(second, 4, NOW);
 
             assertFalse(a.isEmpty(), "первый потребитель не взял ничего");
             assertFalse(b.isEmpty(),
@@ -243,7 +253,7 @@ class OutboxIT extends FirebirdSupport {
 
         try (Connection c = connect()) {
             c.setAutoCommit(false);
-            assertEquals(3, Outbox.claim(c, 3).size(),
+            assertEquals(3, Outbox.claim(c, 3, NOW).size(),
                     "пачка больше запрошенной держит блокировки дольше нужного");
             c.rollback();
         }

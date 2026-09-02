@@ -132,14 +132,8 @@ class PostHttpIT {
         disableStreaming();
         answer = accepted("post.created");
 
-        try (Connection c = dataSource.getConnection();
-             Statement st = c.createStatement()) {
-            st.executeUpdate("DELETE FROM sessions");
-            st.executeUpdate("DELETE FROM comments");
-            st.executeUpdate("DELETE FROM outbox");
-            st.executeUpdate("DELETE FROM posts");
-            st.executeUpdate("DELETE FROM follows");
-            st.executeUpdate("DELETE FROM users");
+        try (Connection c = dataSource.getConnection()) {
+            FirebirdSupport.wipe(c);
             try (PreparedStatement ps = c.prepareStatement(
                     "INSERT INTO users (id, nick, display_name, role, status,"
                             + " password_hash, version, created_at)"

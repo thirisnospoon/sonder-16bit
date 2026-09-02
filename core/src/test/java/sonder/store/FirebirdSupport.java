@@ -5,6 +5,10 @@ import org.flywaydb.core.Flyway;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -71,5 +75,38 @@ abstract class FirebirdSupport {
 
     static Connection connect() throws SQLException {
         return DriverManager.getConnection(jdbcUrl, user, password);
+    }
+
+    /**
+     * Все таблицы схемы, от ссылающихся к тем, на кого ссылаются.
+     *
+     * <p>Список ОДИН на все тесты, и это не удобство. Раньше каждый класс
+     * перечислял таблицы сам, списки разошлись, и стоило одному тесту
+     * начать писать комментарии, как соседний перестал уметь удалить пост:
+     * его список про комментарии не знал. Тот же класс дефекта, что и
+     * разошедшийся с {@code .gitattributes} перечень файлов, и ловится он
+     * так же плохо — не там, где ошиблись.
+     *
+     * <p>Что список ничего не забыл, проверяет
+     * {@code SchemaIT.wipeCoversEverySchemaTable}: таблица, добавленная
+     * миграцией и не добавленная сюда, красит сборку.
+     */
+    static final List<String> TABLES = Collections.unmodifiableList(Arrays.asList(
+            "outbox", "sessions", "follows", "comments", "posts", "users"));
+
+    /** Опустошить базу в уже открытом соединении. Порядок обходит ключи. */
+    static void wipe(Connection c) throws SQLException {
+        try (Statement st = c.createStatement()) {
+            for (String table : TABLES) {
+                st.executeUpdate("DELETE FROM " + table);
+            }
+        }
+    }
+
+    /** То же, но со своим соединением. */
+    static void wipe() throws SQLException {
+        try (Connection c = connect()) {
+            wipe(c);
+        }
     }
 }

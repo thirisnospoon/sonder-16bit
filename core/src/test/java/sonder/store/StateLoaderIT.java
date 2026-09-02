@@ -73,13 +73,8 @@ class StateLoaderIT extends FirebirdSupport {
 
     @BeforeEach
     void clean() throws Exception {
-        try (Connection c = connect(); Statement st = c.createStatement()) {
-            st.executeUpdate("DELETE FROM comments");
-            st.executeUpdate("DELETE FROM follows");
-            st.executeUpdate("DELETE FROM sessions");
-            st.executeUpdate("DELETE FROM outbox");
-            st.executeUpdate("DELETE FROM posts");
-            st.executeUpdate("DELETE FROM users");
+        try (Connection c = connect()) {
+            wipe(c);
             addUser(c, "u-1", "andrey", "USER", "ACTIVE");
             addUser(c, "u-2", "maria", "MODERATOR", "ACTIVE");
         }

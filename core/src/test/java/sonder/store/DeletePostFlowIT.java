@@ -119,11 +119,8 @@ class DeletePostFlowIT extends FirebirdSupport {
     @BeforeEach
     void clean() throws Exception {
         decider = new FakeDecider();
-        try (Connection c = connect(); Statement st = c.createStatement()) {
-            st.executeUpdate("DELETE FROM comments");
-            st.executeUpdate("DELETE FROM outbox");
-            st.executeUpdate("DELETE FROM posts");
-            st.executeUpdate("DELETE FROM users");
+        try (Connection c = connect()) {
+            wipe(c);
             try (PreparedStatement ps = c.prepareStatement(
                     "INSERT INTO users (id, nick, display_name, role, status,"
                             + " password_hash, version, created_at)"
