@@ -135,6 +135,20 @@ CASES: list[Case] = [
         "  CONSTRAINT ck_users_status CHECK (LENGTH(status) > 0)",
         "нет CHECK со списком значений",
     ),
+    (
+        "ядро порождает событие, которого нет в каталоге",
+        "contracts/events/events.yaml",
+        "  - type: post.deleted",
+        "  - type: post.erased",
+        "а events.yaml о нём не знает",
+    ),
+    (
+        "каталог объявляет поле, которого ядро не кладёт",
+        "contracts/events/events.yaml",
+        "      - name: authorId\n        description: Автор поста. По нему ищутся подписчики при фанауте.",
+        "      - name: authorId\n        description: Автор поста. По нему ищутся подписчики при фанауте.\n      - name: body\n        description: Тело поста, которого в событии на самом деле нет.",
+        "поля разошлись",
+    ),
 ]
 
 
@@ -170,6 +184,14 @@ def main() -> int:
             if migrations.exists():
                 shutil.copytree(migrations,
                                 work / "core/src/main/resources/db/migration")
+            # Каталог событий сверяется с тем, что порождает ядро, поэтому
+            # его исходник нужен здесь по той же причине, что и миграции.
+            # Без него проверка не молчит, а честно отказывается сверять —
+            # и самопроверка тогда видит «упал, но не по делу».
+            core = ROOT / "dosnode/src/domain/dmdecide.pas"
+            if core.exists():
+                (work / "dosnode/src/domain").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(core, work / "dosnode/src/domain/dmdecide.pas")
 
             target = work / rel
             text = target.read_bytes().decode("utf-8")

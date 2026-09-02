@@ -500,6 +500,83 @@ def validate_migrations() -> None:
                 )
 
 
+# --------------------------------------------------------------------- events
+def validate_events() -> None:
+    """Каталог событий против того, что ядро на самом деле порождает.
+
+    Событие — контракт между ядром и всем, что живёт после него: очередью,
+    проекциями, лентой, SSE. В WSDL оно описано только СТРУКТУРНО — тип
+    строкой, поля парами, — и иначе быть не может: перечисли типы в
+    контракте вызова, и всякое новое событие ломало бы протокол.
+
+    Отсюда отдельный каталог и эта сверка. Ядро порождает события
+    строковыми литералами; разойтись каталог с ними может молча, и узнать
+    об этом предстояло бы проекции, которая перестала понимать половину
+    очереди.
+
+    Читается не «примерно похожий» текст, а конкретные вызовы EmitEvent и
+    EmitField в dmdecide.pas: имена там литеральные, и по-другому событие
+    не порождается.
+    """
+    path = CONTRACTS / "events" / "events.yaml"
+    if not path.exists():
+        fail(f"нет {path.relative_to(ROOT)}")
+        return
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    declared = doc.get("events", [])
+    check("events.yaml: нет ни одного события", bool(declared))
+
+    by_type: dict[str, dict] = {}
+    for spec in declared:
+        etype = spec.get("type")
+        check(f"events.yaml: у события нет типа: {spec}", bool(etype))
+        if not etype:
+            continue
+        check(f"events.yaml: тип {etype} объявлен дважды", etype not in by_type)
+        check(f"events.yaml: у события {etype} нет агрегата",
+              bool(spec.get("aggregate")))
+        check(f"events.yaml: у события {etype} нет описания",
+              bool(str(spec.get("description", "")).strip()))
+        for field in spec.get("fields", []):
+            check(f"events.yaml: поле события {etype} без имени",
+                  bool(field.get("name")))
+            check(f"events.yaml: поле {etype}.{field.get('name')} без описания",
+                  bool(str(field.get("description", "")).strip()))
+        by_type[etype] = spec
+
+    core = ROOT / "dosnode" / "src" / "domain" / "dmdecide.pas"
+    if not core.exists():
+        fail(f"нет {core.relative_to(ROOT)}: сверять каталог не с чем")
+        return
+
+    emitted: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in core.read_text(encoding="utf-8").splitlines():
+        m = re.search(r"EmitEvent\(\s*A\s*,\s*D\s*,\s*'([^']+)'", line)
+        if m:
+            current = m.group(1)
+            emitted.setdefault(current, [])
+            continue
+        m = re.search(r"EmitField\(\s*A\s*,\s*Ev\s*,\s*'([^']+)'", line)
+        if m and current:
+            emitted[current].append(m.group(1))
+
+    check("dmdecide.pas: не нашлось ни одного порождаемого события — "
+          "сверка была бы пустой", bool(emitted))
+
+    for etype in sorted(set(emitted) - set(by_type)):
+        fail(f"ядро порождает событие {etype}, а events.yaml о нём не знает")
+    for etype in sorted(set(by_type) - set(emitted)):
+        fail(f"events.yaml объявляет событие {etype}, а ядро его не порождает")
+
+    for etype in sorted(set(emitted) & set(by_type)):
+        want = [f["name"] for f in by_type[etype].get("fields", [])]
+        got = emitted[etype]
+        check(f"события {etype}: поля разошлись, ядро кладёт {got}, "
+              f"каталог объявляет {want}", sorted(want) == sorted(got))
+
+
 def main() -> int:
     if not CONTRACTS.exists():
         print(f"нет каталога {CONTRACTS}", file=sys.stderr)
@@ -511,6 +588,7 @@ def main() -> int:
     validate_openapi()
     validate_limits()
     validate_migrations()
+    validate_events()
 
     print(f"проверок выполнено: {checks}")
     if problems:
