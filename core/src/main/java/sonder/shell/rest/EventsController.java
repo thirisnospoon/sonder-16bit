@@ -1,7 +1,6 @@
 package sonder.shell.rest;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -45,7 +44,12 @@ public class EventsController {
         this.timeoutMillis = timeoutMillis;
     }
 
-    @GetMapping(path = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    // Без produces намеренно. Объявленный тип содержимого распространяется
+    // и на отказ, а отказ уходит телом ошибки по контракту — и получает
+    // 406 вместо 401, то есть сообщает клиенту не то, что случилось.
+    // Потоку тип не нужен объявлять: Spring ставит text/event-stream сам,
+    // увидев SseEmitter.
+    @GetMapping("/events")
     public Object subscribe(
             @RequestHeader(value = "Authorization", required = false) String auth)
             throws SQLException {

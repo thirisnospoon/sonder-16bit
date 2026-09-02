@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import sonder.shell.app.ConnectionSource;
@@ -39,7 +38,6 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code RuntimeException}.
  */
 @Configuration
-@EnableScheduling
 @ConditionalOnProperty(name = "sonder.outbox.enabled",
         havingValue = "true", matchIfMissing = true)
 public class OutboxSchedule {

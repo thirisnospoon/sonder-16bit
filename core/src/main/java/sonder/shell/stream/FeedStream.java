@@ -2,6 +2,7 @@ package sonder.shell.stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import sonder.shell.outbox.OutboxDrainer;
@@ -65,12 +66,27 @@ public class FeedStream implements OutboxDrainer.Published {
         this.dataSource = dataSource;
     }
 
-    /** Открыть поток для пользователя. */
+    /**
+     * Открыть поток для пользователя.
+     *
+     * <p>Первым делом в соединение уходит комментарий, и это не
+     * любезность. Пока в поток ничего не записано, ответ не отправлен
+     * вовсе: у клиента нет ни кода, ни заголовков, и он висит до первой
+     * новости — а её может не быть часами. Промежуточные прокси такое
+     * соединение обрывают молча.
+     */
     public SseEmitter open(String userId, long timeoutMillis) {
         SseEmitter emitter = new SseEmitter(timeoutMillis);
         List<SseEmitter> forUser =
                 listeners.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>());
         forUser.add(emitter);
+
+        try {
+            emitter.send(SseEmitter.event().comment("поток открыт"));
+        } catch (IOException | IllegalStateException gone) {
+            // Клиент ушёл, не дождавшись даже приветствия.
+            forUser.remove(emitter);
+        }
 
         // Все три исхода снимают соединение со списка. Не снять хотя бы
         // один — значит копить мёртвые соединения, пока их не станет
@@ -162,6 +178,30 @@ public class FeedStream implements OutboxDrainer.Published {
         }
         for (SseEmitter emitter : dead) {
             remove(userId, emitter);
+        }
+    }
+
+    /**
+     * Удар сердца во все открытые соединения.
+     *
+     * <p>Простаивающее соединение обрывают промежуточные прокси, и обрыв
+     * этот молчаливый: клиент считает, что подписан, а событий больше не
+     * будет никогда. Комментарий раз в двадцать секунд стоит нескольких
+     * байт и делает разрыв заметным обеим сторонам.
+     *
+     * <p>Заодно вычищает соединения, которые уже мертвы: узнать об этом
+     * можно только попыткой записи.
+     */
+    @Scheduled(fixedDelayString = "${sonder.events.heartbeat-ms:20000}")
+    public void heartbeat() {
+        for (Map.Entry<String, List<SseEmitter>> entry : listeners.entrySet()) {
+            for (SseEmitter emitter : entry.getValue()) {
+                try {
+                    emitter.send(SseEmitter.event().comment("тук"));
+                } catch (IOException | IllegalStateException gone) {
+                    remove(entry.getKey(), emitter);
+                }
+            }
         }
     }
 }
