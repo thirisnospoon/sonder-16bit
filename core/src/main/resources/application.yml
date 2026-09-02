@@ -50,6 +50,10 @@ sonder:
     batch: ${SONDER_OUTBOX_BATCH:32}
     # Сколько полных пачек разгребать за заход. Обоснование — в OutboxPump.
     max-rounds: ${SONDER_OUTBOX_MAX_ROUNDS:8}
+    # Дверной звонок: просыпаться на POST_EVENT, а не только по часам.
+    # Выключенный звонок замедляет систему, выключенный опрос её ломает —
+    # поэтому выключать можно только этот.
+    doorbell: ${SONDER_OUTBOX_DOORBELL:true}
 
 server:
   error:

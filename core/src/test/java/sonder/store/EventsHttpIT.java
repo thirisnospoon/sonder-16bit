@@ -56,6 +56,12 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @SpringBootTest(
         classes = Application.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Контекст с включённой очередью не должен переживать свой класс: Spring
+// кэширует контексты, и живой фоновый дренаж уже дважды ломал соседние
+// классы тестов, к очереди отношения не имеющие.
+@org.springframework.test.annotation.DirtiesContext(
+        classMode = org.springframework.test.annotation.DirtiesContext
+                .ClassMode.AFTER_CLASS)
 class EventsHttpIT {
 
     private static final Instant T0 = Instant.parse("2026-09-02T10:00:00Z");
@@ -71,8 +77,13 @@ class EventsHttpIT {
                 () -> System.getProperty("sonder.it.user", "sysdba"));
         registry.add("spring.datasource.password",
                 () -> System.getProperty("sonder.it.password", "masterkey"));
-        // Дренажёр нужен бобом, а расписание — нет: зовём вручную.
+        // Дренажёр нужен бобом, а вот будить его сам никто не должен:
+        // момент рассылки здесь известен точно, потому что дренаж
+        // зовётся вручную. Расписание отодвинуто на десять минут, звонок
+        // выключен совсем — иначе он разобрал бы очередь на вставке, и
+        // читать из потока было бы нечего.
         registry.add("sonder.outbox.enabled", () -> "true");
+        registry.add("sonder.outbox.doorbell", () -> "false");
         registry.add("sonder.outbox.poll-ms", () -> "600000");
         registry.add("sonder.outbox.initial-delay-ms", () -> "600000");
     }
