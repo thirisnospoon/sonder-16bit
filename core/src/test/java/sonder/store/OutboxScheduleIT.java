@@ -42,6 +42,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * работает, а не какое у него число.
  */
 @SpringBootTest(classes = Application.class)
+// Контекст закрывается вместе с классом, и это не гигиена, а исправление
+// найденного дефекта. Spring КЭШИРУЕТ контексты между классами тестов:
+// поднятое здесь расписание с интервалом в двести миллисекунд продолжало
+// работать до конца прогона и разбирало очередь в чужих тестах. Упал при
+// этом SchemaIT — класс, к дренажу отношения не имеющий вовсе.
+@org.springframework.test.annotation.DirtiesContext(
+        classMode = org.springframework.test.annotation.DirtiesContext
+                .ClassMode.AFTER_CLASS)
 class OutboxScheduleIT {
 
     /** Сколько ждать доставки. Двадцать интервалов: медленно, но конечно. */

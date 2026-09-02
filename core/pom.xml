@@ -134,6 +134,65 @@
           </execution>
         </executions>
       </plugin>
+
+      <!--
+        Обогащение событий порождается из contracts/idl/enrichment-v1.idl
+        тем же idlj, что входит в состав JDK 8. Отдельного инструмента нет
+        и не нужно: CORBA удалена из Java начиная с 11, и именно поэтому
+        проект стоит на восьмёрке (ADR-0004).
+
+        Порождаются обе стороны разом (-fall): скелет для core, который
+        отвечает, и стаб для events, который спрашивает. Одна команда для
+        двух сторон — то же самое contract-first, что с WSDL.
+
+        РЕЗУЛЬТАТ НЕ КОММИТИТСЯ по той же причине, что и стабы CXF: он
+        порождается заново при каждой сборке из того же IDL, и разойтись
+        ему не с чем.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>enrichment-idl</id>
+            <phase>generate-sources</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+              <executable>${java.home}/../bin/idlj</executable>
+              <arguments>
+                <argument>-fall</argument>
+                <argument>-td</argument>
+                <argument>${project.build.directory}/generated-sources/idl</argument>
+                <argument>${project.basedir}/../contracts/idl/enrichment-v1.idl</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        idlj кладёт исходники мимо стандартных каталогов, и сам по себе
+        Maven о них не знает. Без этого шага сборка прошла бы зелёной, а
+        классов обогащения в ней не было бы вовсе.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.4.0</version>
+        <executions>
+          <execution>
+            <id>add-idl-sources</id>
+            <phase>generate-sources</phase>
+            <goals><goal>add-source</goal></goals>
+            <configuration>
+              <sources>
+                <source>${project.build.directory}/generated-sources/idl</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 
