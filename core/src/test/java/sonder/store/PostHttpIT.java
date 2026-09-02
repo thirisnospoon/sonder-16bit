@@ -327,7 +327,7 @@ class PostHttpIT {
     @Test
     @DisplayName("без моста к ядру команда отвечает 502")
     void withoutBridgeUnavailable() {
-        sonder.shell.app.UnavailableDecider real = new sonder.shell.app.UnavailableDecider();
+        sonder.shell.decider.UnavailableDecider real = new sonder.shell.decider.UnavailableDecider();
         Decision d = real.createPost(new CreatePostRequest());
         assertEquals("DECIDER_UNAVAILABLE", d.getErrorCode());
         assertEquals(HttpStatus.BAD_GATEWAY,

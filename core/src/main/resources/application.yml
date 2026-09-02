@@ -23,6 +23,19 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+sonder:
+  decider:
+    # Адрес гейтвея, за которым по последовательной линии живёт NODE-7.
+    # Умолчания нет по той же причине, что и у базы: подставленный
+    # localhost однажды пошлёт команды не туда. Пусто — ядра нет, и всякая
+    # команда честно отвечает DECIDER_UNAVAILABLE.
+    endpoint: ${SONDER_DECIDER_ENDPOINT:}
+    # Сроки в миллисекундах. Взяты из замеров спайка S2, обоснование —
+    # в DeciderConfig. Клиента без срока ответа не бывает: умолчание CXF
+    # замерено и равно 60 000 мс — минута на залипшую команду.
+    connect-timeout-ms: ${SONDER_DECIDER_CONNECT_MS:2000}
+    receive-timeout-ms: ${SONDER_DECIDER_RECEIVE_MS:5000}
+
 server:
   error:
     # Стек в ответе клиенту — подсказка тому, кто ищет способ сломать.

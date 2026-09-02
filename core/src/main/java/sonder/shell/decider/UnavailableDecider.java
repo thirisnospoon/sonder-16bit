@@ -1,6 +1,5 @@
-package sonder.shell.app;
+package sonder.shell.decider;
 
-import org.springframework.stereotype.Component;
 import sonder.contract.ErrorCode;
 import sonder.contract.decider.BanUserRequest;
 import sonder.contract.decider.CreateCommentRequest;
@@ -30,11 +29,10 @@ import sonder.contract.decider.UnfollowUserRequest;
  * <p>Отвечает решением, а не исключением: недоступность ядра — штатный
  * исход, известный контракту, а не дефект оболочки.
  *
- * <p>Не помечен {@code @Primary}: в бою он единственный, и объявлять его
- * главным незачем, а в тестах главным становится подменный — два
- * «главных» боба Spring не различает и отказывается поднимать контекст.
+ * <p>Не бобом: какое ядро окажется в контексте, решает
+ * {@link DeciderConfig} — по тому, задан ли адрес. Два кандидата на одну
+ * роль, разбираемые аннотациями, читались бы хуже одного явного условия.
  */
-@Component
 public class UnavailableDecider implements Decider {
 
     private static Decision unavailable() {

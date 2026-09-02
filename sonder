@@ -120,16 +120,48 @@ cmd_codegen() {
 
 # Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
 # Значит он обязан совпадать с тем, что порождается из контрактов прямо сейчас.
+#
+# Что именно сверять, говорят сами генераторы: каждый печатает строку на
+# каждый написанный файл. Раньше здесь стоял список каталогов, а среди них
+# — весь core/src/main/java, где сгенерирован ровно один файл из полусотни.
+# Любая рукописная правка объявлялась «расхождением с контрактами»: проверка
+# врала о причине и не могла стать зелёной раньше коммита, хотя дисциплина
+# требует ровно обратного порядка.
 cmd_check_drift() {
   step "дрейф сгенерированного кода"
-  cmd_codegen > /dev/null || return 1
-  if ! git diff --quiet -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated 2>/dev/null; then
+
+  local out
+  if ! out="$(cmd_codegen 2>&1)"; then
+    echo "$out" | sed 's/^/    /'
+    return 1
+  fi
+
+  local files=()
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] && files+=("$line")
+  done < <(echo "$out" |
+           sed -n 's/^  \([^ ].*\)  \(изменён\|без изменений\)$/\1/p')
+
+  # Проверка, которой нечего сверять, зелена всегда и не значит ничего.
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "    генераторы не назвали ни одного файла — сверять нечего"
+    return 1
+  fi
+
+  # Не git diff, а git status: новый сгенерированный файл ещё не под
+  # версией, и diff его не увидел бы — а это ровно тот случай, ради
+  # которого проверка и написана.
+  local dirty
+  dirty="$(git status --porcelain -- "${files[@]}" 2>/dev/null)"
+  if [ -n "$dirty" ]; then
     echo "    сгенерированный код разошёлся с контрактами:"
-    git diff --stat -- dosnode/src/generated core/src/main/java web/src/generated contracts/generated | sed 's/^/      /'
+    echo "$dirty" | sed 's/^/      /'
     echo "    ./sonder codegen и закоммить результат"
     return 1
   fi
-  echo "    совпадает с контрактами"
+
+  echo "    совпадает с контрактами, сверено файлов ${#files[@]}"
 }
 
 cmd_verify() {
