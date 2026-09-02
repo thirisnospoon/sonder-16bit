@@ -62,6 +62,12 @@ class FeedHttpIT {
                 () -> System.getProperty("sonder.it.user", "sysdba"));
         registry.add("spring.datasource.password",
                 () -> System.getProperty("sonder.it.password", "masterkey"));
+        // Фоновый дренаж очереди в этих тестах ВЫКЛЮЧЕН намеренно. Он
+        // разбирает outbox сам по себе, а здесь проверяется в том числе
+        // то, что в очереди лежит: тест, проверяющий содержимое очереди
+        // при работающем потребителе, проверял бы гонку. Дренаж как
+        // таковой проверяется отдельно, там, где его зовут явно.
+        registry.add("sonder.outbox.enabled", () -> "false");
     }
 
     @Autowired

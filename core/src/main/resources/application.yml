@@ -35,6 +35,21 @@ sonder:
     # замерено и равно 60 000 мс — минута на залипшую команду.
     connect-timeout-ms: ${SONDER_DECIDER_CONNECT_MS:2000}
     receive-timeout-ms: ${SONDER_DECIDER_RECEIVE_MS:5000}
+  outbox:
+    # Фоновый дренаж очереди исходящих. Выключается целиком — например,
+    # когда экземпляр обслуживает только чтение и разгребать очередь
+    # должен другой.
+    enabled: ${SONDER_OUTBOX_ENABLED:true}
+    # Интервал между заходами, от КОНЦА прошлого. Задержка доставки
+    # события ограничена им сверху: уведомление Firebird укоротит её, но
+    # опрос остаётся основным путём — потерянное уведомление означало бы
+    # навсегда застрявшее событие.
+    poll-ms: ${SONDER_OUTBOX_POLL_MS:1000}
+    # Первый заход не сразу: пусть приложение сначала поднимется.
+    initial-delay-ms: ${SONDER_OUTBOX_INITIAL_MS:2000}
+    batch: ${SONDER_OUTBOX_BATCH:32}
+    # Сколько полных пачек разгребать за заход. Обоснование — в OutboxPump.
+    max-rounds: ${SONDER_OUTBOX_MAX_ROUNDS:8}
 
 server:
   error:
