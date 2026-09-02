@@ -44,6 +44,7 @@ const
   ERR_NICK_TAKEN                 = 'NICK_TAKEN';
   ERR_SELF_FOLLOW                = 'SELF_FOLLOW';
   ERR_ALREADY_FOLLOWING          = 'ALREADY_FOLLOWING';
+  ERR_NOT_FOLLOWING              = 'NOT_FOLLOWING';
   ERR_ALREADY_BANNED             = 'ALREADY_BANNED';
   ERR_STATE_VERSION_CONFLICT     = 'STATE_VERSION_CONFLICT';
 
@@ -61,7 +62,7 @@ const
   ERR_MALFORMED_ENVELOPE         = 'MALFORMED_ENVELOPE';
 
   { Число кодов: полезно для проверки полноты таблиц. }
-  ERR_CODE_COUNT = 31;
+  ERR_CODE_COUNT = 32;
 
   { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
     из TcResult: добавление длинного кода не должно молча
@@ -71,8 +72,8 @@ const
   { Коды, которые возвращает функция решения. По каждому из них
     golden-набор обязан иметь случай: код, который ничто не
     порождает, существует только на бумаге. }
-  ERR_DECISION_CODE_COUNT = 22;
-  ErrDecisionCodes: array[1..22] of PChar = (
+  ERR_DECISION_CODE_COUNT = 23;
+  ErrDecisionCodes: array[1..23] of PChar = (
     'NICK_FORMAT_INVALID',
     'POST_BODY_EMPTY',
     'POST_BODY_TOO_LONG',
@@ -91,6 +92,7 @@ const
     'NICK_TAKEN',
     'SELF_FOLLOW',
     'ALREADY_FOLLOWING',
+    'NOT_FOLLOWING',
     'ALREADY_BANNED',
     'POST_RATE_EXCEEDED',
     'COMMENT_RATE_EXCEEDED',

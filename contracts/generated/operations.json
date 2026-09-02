@@ -74,6 +74,25 @@
       ]
     },
     {
+      "operation": "UnfollowUser",
+      "soapAction": "urn:sonder:decider:v1:UnfollowUser",
+      "request": "UnfollowUserRequest",
+      "requiredContext": [
+        {
+          "element": "actor",
+          "type": "TActorContext"
+        },
+        {
+          "element": "target",
+          "type": "TTargetUserContext"
+        },
+        {
+          "element": "follow",
+          "type": "TFollowContext"
+        }
+      ]
+    },
+    {
       "operation": "BanUser",
       "soapAction": "urn:sonder:decider:v1:BanUser",
       "request": "BanUserRequest",

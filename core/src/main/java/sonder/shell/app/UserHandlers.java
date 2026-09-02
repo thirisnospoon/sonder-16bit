@@ -14,6 +14,8 @@ import sonder.contract.decider.NickContext;
 import sonder.contract.decider.RegisterUserCommand;
 import sonder.contract.decider.RegisterUserRequest;
 import sonder.contract.decider.TargetUserContext;
+import sonder.contract.decider.UnfollowUserCommand;
+import sonder.contract.decider.UnfollowUserRequest;
 import sonder.contract.decider.UserStatus;
 import sonder.shell.outbox.Outbox;
 import sonder.shell.outbox.OutboxEvent;
@@ -172,6 +174,48 @@ public final class UserHandlers {
         command.setTargetUserId(targetId);
 
         FollowUserRequest request = new FollowUserRequest();
+        request.setMeta(meta(traceId, traceId, now));
+        request.setCommand(command);
+        request.setActor(state.actor);
+        request.setTarget(state.target);
+        request.setFollow(state.follow);
+        return request;
+    }
+
+    /**
+     * Отписка.
+     *
+     * <p>Состояние то же, что у подписки, а операция отдельная: одна
+     * операция с флагом «подписаться или отписаться» заставила бы ядро
+     * ветвиться внутри решения, а контракт — умалчивать, какие отказы к
+     * какой ветке относятся.
+     */
+    public Outcome unfollow(String actorId, String targetId,
+                            String traceId, Instant now) throws Exception {
+        return flow.run(
+                c -> new FollowState(
+                        StateLoader.loadActor(c, actorId, now),
+                        StateLoader.loadTarget(c, targetId),
+                        StateLoader.loadFollow(c, actorId, targetId)),
+                state -> decider.unfollowUser(
+                        unfollowRequest(state, targetId, traceId, now)),
+                (c, state, decision) -> {
+                    if (!decision.isAccepted()) {
+                        return new Outcome(false, decision.getErrorCode(), null);
+                    }
+                    UserStore.removeFollow(c, actorId, targetId);
+                    writeEvents(c, decision, traceId);
+                    return new Outcome(true, null, targetId);
+                });
+    }
+
+    private static UnfollowUserRequest unfollowRequest(FollowState state,
+                                                       String targetId,
+                                                       String traceId, Instant now) {
+        UnfollowUserCommand command = new UnfollowUserCommand();
+        command.setTargetUserId(targetId);
+
+        UnfollowUserRequest request = new UnfollowUserRequest();
         request.setMeta(meta(traceId, traceId, now));
         request.setCommand(command);
         request.setActor(state.actor);

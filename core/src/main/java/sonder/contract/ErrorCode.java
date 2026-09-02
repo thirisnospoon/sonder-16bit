@@ -64,6 +64,8 @@ public enum ErrorCode {
     SELF_FOLLOW(Category.CONFLICT, 409, false, true),
     /** Подписка уже существует */
     ALREADY_FOLLOWING(Category.CONFLICT, 409, false, true),
+    /** Отписаться нельзя: подписки нет. Зеркало ALREADY_FOLLOWING, и появился код вместе с операцией UnfollowUser. Отписка от себя приходит сюда же, а не в SELF_FOLLOW: подписаться на себя нельзя, значит и подписки на себя не бывает, и «вы не подписаны» — точное описание, а не подмена. */
+    NOT_FOLLOWING(Category.CONFLICT, 409, false, true),
     /** Пользователь уже заблокирован */
     ALREADY_BANNED(Category.CONFLICT, 409, false, true),
     /** Состояние изменилось между загрузкой и сохранением, команду надо переиграть */

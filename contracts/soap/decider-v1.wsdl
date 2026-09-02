@@ -272,6 +272,28 @@
         </xs:complexType>
       </xs:element>
 
+      <!-- Отписка. Команда та же, что у подписки, но операция отдельная:
+           одна операция с флагом «подписаться или отписаться» заставила бы
+           ядро ветвиться внутри решения, а контракт — умалчивать, какие
+           отказы к какой ветке относятся. -->
+      <xs:complexType name="UnfollowUserCommand">
+        <xs:sequence>
+          <xs:element name="targetUserId" type="tns:Id"/>
+        </xs:sequence>
+      </xs:complexType>
+
+      <xs:element name="UnfollowUserRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="meta"    type="tns:CommandMeta"/>
+            <xs:element name="command" type="tns:UnfollowUserCommand"/>
+            <xs:element name="actor"   type="tns:ActorContext"/>
+            <xs:element name="target"  type="tns:TargetUserContext"/>
+            <xs:element name="follow"  type="tns:FollowContext"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
       <xs:complexType name="BanUserCommand">
         <xs:sequence>
           <xs:element name="targetUserId" type="tns:Id"/>
@@ -324,6 +346,7 @@
   <wsdl:message name="CreateCommentIn"><wsdl:part name="body" element="tns:CreateCommentRequest"/></wsdl:message>
   <wsdl:message name="DeletePostIn">  <wsdl:part name="body" element="tns:DeletePostRequest"/></wsdl:message>
   <wsdl:message name="FollowUserIn">  <wsdl:part name="body" element="tns:FollowUserRequest"/></wsdl:message>
+  <wsdl:message name="UnfollowUserIn"><wsdl:part name="body" element="tns:UnfollowUserRequest"/></wsdl:message>
   <wsdl:message name="BanUserIn">     <wsdl:part name="body" element="tns:BanUserRequest"/></wsdl:message>
   <wsdl:message name="DecisionOut">   <wsdl:part name="body" element="tns:DecisionResponse"/></wsdl:message>
   <wsdl:message name="PingIn">        <wsdl:part name="body" element="tns:PingRequest"/></wsdl:message>
@@ -357,6 +380,11 @@
 
     <wsdl:operation name="FollowUser">
       <wsdl:input  message="tns:FollowUserIn"/>
+      <wsdl:output message="tns:DecisionOut"/>
+    </wsdl:operation>
+
+    <wsdl:operation name="UnfollowUser">
+      <wsdl:input  message="tns:UnfollowUserIn"/>
       <wsdl:output message="tns:DecisionOut"/>
     </wsdl:operation>
 
@@ -406,6 +434,12 @@
 
     <wsdl:operation name="FollowUser">
       <soap:operation soapAction="urn:sonder:decider:v1:FollowUser"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="UnfollowUser">
+      <soap:operation soapAction="urn:sonder:decider:v1:UnfollowUser"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input>
       <wsdl:output><soap:body use="literal"/></wsdl:output>
     </wsdl:operation>

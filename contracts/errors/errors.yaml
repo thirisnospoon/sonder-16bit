@@ -168,6 +168,16 @@ codes:
     category: CONFLICT
     description: "Подписка уже существует"
     decided_by: core
+  - code: NOT_FOLLOWING
+    category: CONFLICT
+    description: >-
+      Отписаться нельзя: подписки нет. Зеркало ALREADY_FOLLOWING, и
+      появился код вместе с операцией UnfollowUser.
+
+      Отписка от себя приходит сюда же, а не в SELF_FOLLOW: подписаться на
+      себя нельзя, значит и подписки на себя не бывает, и «вы не подписаны»
+      — точное описание, а не подмена.
+    decided_by: core
   - code: ALREADY_BANNED
     category: CONFLICT
     description: "Пользователь уже заблокирован"

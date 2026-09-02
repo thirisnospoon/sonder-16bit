@@ -16,6 +16,7 @@ import sonder.contract.decider.FollowUserRequest;
 import sonder.contract.decider.PingRequest;
 import sonder.contract.decider.PingResponse;
 import sonder.contract.decider.RegisterUserRequest;
+import sonder.contract.decider.UnfollowUserRequest;
 import sonder.shell.app.CommandFlow;
 import sonder.shell.app.DeletePostHandler;
 import sonder.shell.app.VersionConflict;
@@ -99,6 +100,7 @@ class DeletePostFlowIT extends FirebirdSupport {
         @Override public Decision createComment(CreateCommentRequest r) { return answer; }
         @Override public Decision registerUser(RegisterUserRequest r) { return answer; }
         @Override public Decision followUser(FollowUserRequest r) { return answer; }
+        @Override public Decision unfollowUser(UnfollowUserRequest r) { return answer; }
         @Override public Decision banUser(BanUserRequest r) { return answer; }
 
         @Override

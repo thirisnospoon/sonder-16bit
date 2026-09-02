@@ -51,6 +51,8 @@ function FillDeletePost(var Req: TDeletePostRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
 function FillFollowUser(var Req: TFollowUserRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
+function FillUnfollowUser(var Req: TUnfollowUserRequest;
+                 const Group, Field, Value: TStr): TFillOutcome;
 function FillBanUser(var Req: TBanUserRequest;
                  const Group, Field, Value: TStr): TFillOutcome;
 function FillPing(var Req: TPingRequest;
@@ -580,6 +582,126 @@ begin
   else
     Res := foUnknown;
   FillFollowUser := Res;
+end;
+
+function FillUnfollowUser(var Req: TUnfollowUserRequest;
+                 const Group, Field, Value: TStr): TFillOutcome;
+var
+  Res: TFillOutcome;
+  Tmp: Int64;
+begin
+  Res := foOk;
+  if StrEqPas(Group, 'meta') then
+  begin
+    if StrEqPas(Field, 'traceId') then
+    begin
+      Req.meta.traceId := Value;
+    end
+    else if StrEqPas(Field, 'commandId') then
+    begin
+      Req.meta.commandId := Value;
+    end
+    else if StrEqPas(Field, 'issuedAtMillis') then
+    begin
+      if StrToInt64(Value, Tmp) then
+        Req.meta.issuedAtMillis := Tmp
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'command') then
+  begin
+    if StrEqPas(Field, 'targetUserId') then
+    begin
+      Req.command.targetUserId := Value;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'actor') then
+  begin
+    if StrEqPas(Field, 'userId') then
+    begin
+      Req.actor.userId := Value;
+    end
+    else if StrEqPas(Field, 'role') then
+    begin
+      if not ParseRole(Value, Req.actor.role) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'status') then
+    begin
+      if not ParseUserStatus(Value, Req.actor.status) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'postsLastHour') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.actor.postsLastHour := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'commentsLastHour') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.actor.commentsLastHour := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'target') then
+  begin
+    if StrEqPas(Field, 'exists') then
+    begin
+      if StrEqPas(Value, 'true') then Req.target.exists := True
+      else if StrEqPas(Value, 'false') then Req.target.exists := False
+      else Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'userId') then
+    begin
+      Req.target.userId := Value;
+    end
+    else if StrEqPas(Field, 'role') then
+    begin
+      if not ParseRole(Value, Req.target.role) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'status') then
+    begin
+      if not ParseUserStatus(Value, Req.target.status) then
+        Res := foBadValue;
+    end
+    else if StrEqPas(Field, 'version') then
+    begin
+      if StrToInt64(Value, Tmp) and (Tmp >= -2147483647)
+         and (Tmp <= 2147483647) then
+        Req.target.version := LongInt(Tmp)
+      else
+        Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else if StrEqPas(Group, 'follow') then
+  begin
+    if StrEqPas(Field, 'alreadyFollowing') then
+    begin
+      if StrEqPas(Value, 'true') then Req.follow.alreadyFollowing := True
+      else if StrEqPas(Value, 'false') then Req.follow.alreadyFollowing := False
+      else Res := foBadValue;
+    end
+    else
+      Res := foUnknown;
+  end
+  else
+    Res := foUnknown;
+  FillUnfollowUser := Res;
 end;
 
 function FillBanUser(var Req: TBanUserRequest;

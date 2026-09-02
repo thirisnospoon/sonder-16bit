@@ -57,6 +57,9 @@ function DecideCreateComment(var A: TArena; const Req: TCreateCommentRequest;
 function DecideFollowUser(var A: TArena; const Req: TFollowUserRequest;
                           var D: TDecision): TResult;
 
+function DecideUnfollowUser(var A: TArena; const Req: TUnfollowUserRequest;
+                            var D: TDecision): TResult;
+
 function DecideBanUser(var A: TArena; const Req: TBanUserRequest;
                        var D: TDecision): TResult;
 
@@ -574,6 +577,58 @@ end;
 { ------------------------------------------------------------------
   BanUser
   ------------------------------------------------------------------ }
+
+function DecideUnfollowUser(var A: TArena; const Req: TUnfollowUserRequest;
+                            var D: TDecision): TResult;
+var
+  Ev: PDomainEventNode;
+  R: TResult;
+begin
+  ClearDecision(D);
+  DecideUnfollowUser := Ok;
+
+  if (not ActorComplete(Req.actor)) or (not TargetComplete(Req.target)) then
+  begin
+    Reject(D, ERR_INSUFFICIENT_CONTEXT);
+    Exit;
+  end;
+
+  if (not Req.target.exists) or IsGone(Req.target.status) then
+  begin
+    Reject(D, ERR_USER_NOT_FOUND);
+    Exit;
+  end;
+
+  { Заблокированный не действует вовсе, а не только не создаёт содержимое.
+    Отписка выглядит безобидной, но блокировка означает «действия этого
+    пользователя не принимаются», и делать из неё исключение значило бы
+    завести правило с оговоркой, о которой потом никто не вспомнит. }
+  if IsBanned(Req.actor.status) then
+  begin
+    Reject(D, ERR_ACTOR_BANNED);
+    Exit;
+  end;
+
+  { Отписка от себя приходит сюда же, а не в SELF_FOLLOW: подписаться на
+    себя нельзя, значит подписки на себя не бывает, и «вы не подписаны» —
+    точное описание, а не подмена понятий. }
+  if not Req.follow.alreadyFollowing then
+  begin
+    Reject(D, ERR_NOT_FOLLOWING);
+    Exit;
+  end;
+
+  AcceptEmpty(D);
+  R := EmitEvent(A, D, 'follow.removed', Req.actor.userId, Ev);
+  if not R.Ok then
+  begin
+    DecideUnfollowUser := R;
+    Exit;
+  end;
+  R := EmitField(A, Ev, 'targetUserId', Req.command.targetUserId);
+  if not R.Ok then
+    DecideUnfollowUser := R;
+end;
 
 function DecideBanUser(var A: TArena; const Req: TBanUserRequest;
                        var D: TDecision): TResult;

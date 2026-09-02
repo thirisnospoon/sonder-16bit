@@ -38,7 +38,7 @@ const
   TapFile    = 'tstdomn.tap';
 {$ENDIF}
 
-  PlannedTests = 76;
+  PlannedTests = 83;
   Seed0 = 20260903;
 
 var
@@ -229,6 +229,21 @@ begin
   Req.post.version := 1;
 end;
 
+procedure BaseUnfollow(var Req: TUnfollowUserRequest);
+begin
+  ResetStrings;
+  FillChar(Req, SizeOf(Req), 0);
+  Req.command.targetUserId := StrView(STarget);
+  BaseActor(Req.actor);
+  Req.target.exists := True;
+  Req.target.userId := StrView(STarget);
+  Req.target.role := Role_USER;
+  Req.target.status := UserStatus_ACTIVE;
+  Req.target.version := 1;
+  { Заготовка корректна: подписка есть, значит отписка возможна. }
+  Req.follow.alreadyFollowing := True;
+end;
+
 procedure BaseBan(var Req: TBanUserRequest);
 begin
   ResetStrings;
@@ -294,6 +309,7 @@ var
   RU: TRegisterUserRequest;
   DP: TDeletePostRequest;
   FU: TFollowUserRequest;
+  UF: TUnfollowUserRequest;
   BU: TBanUserRequest;
   I, Bad: LongInt;
   N: Integer;
@@ -778,6 +794,57 @@ begin
 
   TestDiagInt('арена: пик за прогон', Arena.HighMark);
   TestTrue('арена решений не переполнилась', Arena.HighMark < Arena.Capacity);
+
+  { ================================================================
+    UnfollowUser
+
+    Операции не было в контракте вовсе, хотя веб объявлял
+    DELETE на подписку. Третья дыра такого рода, и найдена
+    тем же способом — сверкой объявленного с реализованным.
+    ================================================================ }
+
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckAccepted('корректная отписка принимается', D);
+  TestEqStr('тип события отписки', FirstEventType(D), 'follow.removed');
+
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  UF.actor.postsLastHour := -1;
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckRejected('неполное состояние при отписке отвергается',
+                D, 'INSUFFICIENT_CONTEXT');
+
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  UF.target.exists := False;
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckRejected('отписка от несуществующего отвергается',
+                D, 'USER_NOT_FOUND');
+
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  UF.actor.status := UserStatus_BANNED;
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckRejected('заблокированный не отписывается', D, 'ACTOR_BANNED');
+
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  UF.follow.alreadyFollowing := False;
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckRejected('отписка без подписки отвергается', D, 'NOT_FOLLOWING');
+
+  { Отписка от себя приходит в NOT_FOLLOWING, а не в SELF_FOLLOW:
+    подписаться на себя нельзя, значит подписки на себя не бывает. }
+  ArenaReset(Arena);
+  BaseUnfollow(UF);
+  UF.target.userId := StrView(SActor);
+  UF.command.targetUserId := StrView(SActor);
+  UF.follow.alreadyFollowing := False;
+  R := DecideUnfollowUser(Arena, UF, D);
+  CheckRejected('отписка от себя — это «не подписан», а не «нельзя на себя»',
+                D, 'NOT_FOLLOWING');
 
   ArenaDestroy(Arena);
   { ================================================================

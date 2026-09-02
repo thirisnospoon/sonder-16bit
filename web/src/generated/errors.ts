@@ -34,6 +34,7 @@ export type ErrorCode =
   | 'NICK_TAKEN'
   | 'SELF_FOLLOW'
   | 'ALREADY_FOLLOWING'
+  | 'NOT_FOLLOWING'
   | 'ALREADY_BANNED'
   | 'STATE_VERSION_CONFLICT'
   | 'POST_RATE_EXCEEDED'
@@ -83,6 +84,7 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   NICK_TAKEN: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   SELF_FOLLOW: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   ALREADY_FOLLOWING: { category: 'CONFLICT', httpStatus: 409, retryable: false },
+  NOT_FOLLOWING: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   ALREADY_BANNED: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   STATE_VERSION_CONFLICT: { category: 'CONFLICT', httpStatus: 409, retryable: false },
   POST_RATE_EXCEEDED: { category: 'RATE_LIMIT', httpStatus: 429, retryable: true },

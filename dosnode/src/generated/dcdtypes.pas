@@ -111,6 +111,10 @@ type
     targetUserId: TStr;
   end;
 
+  TUnfollowUserCommand = record
+    targetUserId: TStr;
+  end;
+
   TBanUserCommand = record
     targetUserId: TStr;
     reason: TStr;
@@ -150,6 +154,14 @@ type
     follow: TFollowContext;
   end;
 
+  TUnfollowUserRequest = record
+    meta: TCommandMeta;
+    command: TUnfollowUserCommand;
+    actor: TActorContext;
+    target: TTargetUserContext;
+    follow: TFollowContext;
+  end;
+
   TBanUserRequest = record
     meta: TCommandMeta;
     command: TBanUserCommand;
@@ -184,12 +196,13 @@ const
   PostStatusNames: array[TPostStatus] of PChar = ('VISIBLE', 'DELETED');
 
   { Операции контракта. }
-  OperationCount = 7;
+  OperationCount = 8;
   Op_RegisterUser = 'RegisterUser';
   Op_CreatePost = 'CreatePost';
   Op_CreateComment = 'CreateComment';
   Op_DeletePost = 'DeletePost';
   Op_FollowUser = 'FollowUser';
+  Op_UnfollowUser = 'UnfollowUser';
   Op_BanUser = 'BanUser';
   Op_Ping = 'Ping';
 

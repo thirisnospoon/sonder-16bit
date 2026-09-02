@@ -46,11 +46,6 @@ class RestContractTest {
      * список означает, что оболочка сдержала контракт целиком.
      */
     private static final Set<String> PENDING = new LinkedHashSet<>(java.util.Arrays.asList(
-            // unfollow ждёт КОНТРАКТА, а не реализации: операции
-            // UnfollowUser нет в decider-v1.wsdl вовсе, как не было
-            // CreateComment до того, как её завели. Отдельная строка,
-            // чтобы это не выглядело ленью.
-            "unfollow",
             // getFeed и subscribe ждут фазы 7: лента строится проекцией
             // из событий, а подписка на события — их фанаутом.
             "getFeed",
@@ -192,7 +187,7 @@ class RestContractTest {
     @Test
     @DisplayName("отложенного не больше, чем было зафиксировано")
     void pendingDoesNotGrow() {
-        assertTrue(PENDING.size() <= 3,
+        assertTrue(PENDING.size() <= 2,
                 "список отложенного вырос до " + PENDING.size()
                         + ": контракт обещает больше, чем оболочка делает");
     }

@@ -29,6 +29,7 @@ import sonder.contract.decider.FollowUserRequest;
 import sonder.contract.decider.PingRequest;
 import sonder.contract.decider.PingResponse;
 import sonder.contract.decider.RegisterUserRequest;
+import sonder.contract.decider.UnfollowUserRequest;
 import sonder.shell.auth.Passwords;
 
 import javax.sql.DataSource;
@@ -64,6 +65,7 @@ class UserHttpIT {
     static RegisterUserRequest lastRegister;
     static FollowUserRequest lastFollow;
     static BanUserRequest lastBan;
+    static UnfollowUserRequest lastUnfollow;
 
     static Decision accepted(String type, String aggregateId) {
         Decision d = new Decision();
@@ -106,6 +108,12 @@ class UserHttpIT {
                     return answer;
                 }
 
+                @Override
+                public Decision unfollowUser(UnfollowUserRequest r) {
+                    lastUnfollow = r;
+                    return answer;
+                }
+
                 @Override public Decision createPost(CreatePostRequest r) { return answer; }
                 @Override public Decision deletePost(DeletePostRequest r) { return answer; }
                 @Override public Decision createComment(CreateCommentRequest r) { return answer; }
@@ -141,6 +149,7 @@ class UserHttpIT {
         lastRegister = null;
         lastFollow = null;
         lastBan = null;
+        lastUnfollow = null;
 
         try (Connection c = dataSource.getConnection();
              Statement st = c.createStatement()) {
@@ -343,6 +352,49 @@ class UserHttpIT {
                 HttpMethod.PUT, authed(null), Map.class);
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertEquals("RESOURCE_NOT_FOUND", response.getBody().get("code"));
+    }
+
+    @Test
+    @DisplayName("отписка удаляет связь и ядро видит, что подписка есть")
+    void unfollowRemovesEdge() throws Exception {
+        answer = accepted("user.followed", "u-2");
+        http.exchange("/users/maria/follow", HttpMethod.PUT, authed(null), Map.class);
+
+        answer = accepted("follow.removed", "u-1");
+        ResponseEntity<Map> response = http.exchange("/users/maria/follow",
+                HttpMethod.DELETE, authed(null), Map.class);
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        assertNotNull(lastUnfollow, "ядро не было спрошено об отписке");
+        assertTrue(lastUnfollow.getFollow().isAlreadyFollowing(),
+                "ядру сказали, что подписки нет, хотя она была");
+        assertEquals("u-2", lastUnfollow.getCommand().getTargetUserId());
+
+        try (Connection c = dataSource.getConnection();
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT COUNT(*) FROM follows WHERE follower_id = 'u-1'")) {
+            rs.next();
+            assertEquals(0, rs.getLong(1), "подписка не удалена");
+        }
+    }
+
+    /**
+     * Отписка без подписки — отказ ЯДРА, а не оболочки. Оболочка не
+     * проверяет этого сама: правило жило бы в двух местах.
+     */
+    @Test
+    @DisplayName("отписка без подписки отвергается ядром")
+    void unfollowWithoutFollow() throws Exception {
+        answer = rejected("NOT_FOLLOWING");
+        ResponseEntity<Map> response = http.exchange("/users/maria/follow",
+                HttpMethod.DELETE, authed(null), Map.class);
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals("NOT_FOLLOWING", response.getBody().get("code"));
+        assertNotNull(lastUnfollow, "ядро не было спрошено");
+        assertFalse(lastUnfollow.getFollow().isAlreadyFollowing(),
+                "ядру приехало неверное состояние подписки");
     }
 
     @Test

@@ -2,6 +2,7 @@ package sonder.shell.rest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -185,6 +186,35 @@ public class UserController {
         try {
             outcome = new UserHandlers(flow, decider)
                     .follow(actorId, targetId, traceId, Instant.now());
+        } catch (VersionConflict conflict) {
+            return RestErrors.of(ErrorCode.STATE_VERSION_CONFLICT, traceId);
+        }
+
+        if (!outcome.isAccepted()) {
+            return RestErrors.of(outcome.getErrorCode(), traceId);
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/users/{nick}/follow")
+    public ResponseEntity<Map<String, Object>> unfollow(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable String nick) throws Exception {
+        String traceId = newTraceId();
+        String actorId = actor(auth);
+        if (actorId == null) {
+            return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
+        }
+
+        String targetId = idByNick(nick);
+        if (targetId == null) {
+            return RestErrors.of(ErrorCode.RESOURCE_NOT_FOUND, traceId);
+        }
+
+        UserHandlers.Outcome outcome;
+        try {
+            outcome = new UserHandlers(flow, decider)
+                    .unfollow(actorId, targetId, traceId, Instant.now());
         } catch (VersionConflict conflict) {
             return RestErrors.of(ErrorCode.STATE_VERSION_CONFLICT, traceId);
         }

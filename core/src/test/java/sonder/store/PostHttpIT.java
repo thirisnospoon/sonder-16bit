@@ -29,6 +29,7 @@ import sonder.contract.decider.FollowUserRequest;
 import sonder.contract.decider.PingRequest;
 import sonder.contract.decider.PingResponse;
 import sonder.contract.decider.RegisterUserRequest;
+import sonder.contract.decider.UnfollowUserRequest;
 import sonder.shell.auth.Passwords;
 
 import javax.sql.DataSource;
@@ -99,6 +100,7 @@ class PostHttpIT {
                 @Override public Decision registerUser(RegisterUserRequest r) { return answer; }
                 @Override public Decision createComment(CreateCommentRequest r) { return answer; }
                 @Override public Decision followUser(FollowUserRequest r) { return answer; }
+                @Override public Decision unfollowUser(UnfollowUserRequest r) { return answer; }
                 @Override public Decision banUser(BanUserRequest r) { return answer; }
                 @Override public PingResponse ping(PingRequest r) { return new PingResponse(); }
             };

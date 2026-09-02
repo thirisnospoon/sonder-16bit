@@ -12,6 +12,7 @@ import sonder.contract.decider.FollowUserRequest;
 import sonder.contract.decider.PingRequest;
 import sonder.contract.decider.PingResponse;
 import sonder.contract.decider.RegisterUserRequest;
+import sonder.contract.decider.UnfollowUserRequest;
 
 /**
  * Заглушка ядра до появления транспорта.
@@ -49,6 +50,7 @@ public class UnavailableDecider implements Decider {
     @Override public Decision createComment(CreateCommentRequest r) { return unavailable(); }
     @Override public Decision deletePost(DeletePostRequest r) { return unavailable(); }
     @Override public Decision followUser(FollowUserRequest r) { return unavailable(); }
+    @Override public Decision unfollowUser(UnfollowUserRequest r) { return unavailable(); }
     @Override public Decision banUser(BanUserRequest r) { return unavailable(); }
 
     @Override
