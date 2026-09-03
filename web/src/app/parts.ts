@@ -58,6 +58,7 @@ const ФРАЗЫ: Partial<Record<ErrorCode, string>> = {
   COMMENT_RATE_EXCEEDED: 'Слишком часто. Подождите немного.',
   LOGIN_RATE_EXCEEDED: 'Слишком много попыток входа.',
   DECIDER_UNAVAILABLE: 'Ядро недоступно. Попробуйте позже.',
+  GATEWAY_UNAVAILABLE: 'Сервер перезапускается. Повторите через минуту.',
   STATE_VERSION_CONFLICT: 'Данные изменились. Обновите страницу и повторите.',
 }
 

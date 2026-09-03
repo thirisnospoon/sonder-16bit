@@ -45,6 +45,7 @@ export type ErrorCode =
   | 'DECIDER_PANIC'
   | 'MALFORMED_ENVELOPE'
   | 'INTERNAL_ERROR'
+  | 'GATEWAY_UNAVAILABLE'
 
 export type ErrorCategory =
   | 'VALIDATION'
@@ -96,6 +97,7 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   DECIDER_PANIC: { category: 'INTERNAL', httpStatus: 500, retryable: false },
   MALFORMED_ENVELOPE: { category: 'INTERNAL', httpStatus: 500, retryable: false },
   INTERNAL_ERROR: { category: 'INTERNAL', httpStatus: 500, retryable: false },
+  GATEWAY_UNAVAILABLE: { category: 'UPSTREAM', httpStatus: 502, retryable: true },
 }
 
 export const ALL_ERROR_CODES = Object.keys(ERROR_META) as ErrorCode[]

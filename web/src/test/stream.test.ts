@@ -15,6 +15,9 @@ import { EVENT_TYPES } from '../generated/events.js'
 interface Fake extends EventSourceLike {
   listeners: Map<string, Array<(event: MessageEvent) => void>>
   closed: boolean
+  // Перекрываем `readonly` из EventSourceLike: настоящий EventSource
+  // меняет состояние сам, подделке надо это уметь руками.
+  readyState: number
   emit(type: string, data: string, id?: string): void
 }
 
@@ -25,6 +28,8 @@ function fakeSource(): Fake {
     closed: false,
     onopen: null,
     onerror: null,
+    // 1 — открыто. Подделка живёт, пока её не закроют.
+    readyState: 1,
     addEventListener(type, listener) {
       const existing = listeners.get(type) ?? []
       existing.push(listener)
@@ -32,6 +37,7 @@ function fakeSource(): Fake {
     },
     close() {
       source.closed = true
+      source.readyState = 2
     },
     emit(type, data, id = '') {
       for (const listener of listeners.get(type) ?? []) {

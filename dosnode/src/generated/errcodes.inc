@@ -62,8 +62,11 @@ const
   ERR_MALFORMED_ENVELOPE         = 'MALFORMED_ENVELOPE';
   ERR_INTERNAL_ERROR             = 'INTERNAL_ERROR';
 
+  { --- UPSTREAM --- }
+  ERR_GATEWAY_UNAVAILABLE        = 'GATEWAY_UNAVAILABLE';
+
   { Число кодов: полезно для проверки полноты таблиц. }
-  ERR_CODE_COUNT = 33;
+  ERR_CODE_COUNT = 34;
 
   { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
     из TcResult: добавление длинного кода не должно молча

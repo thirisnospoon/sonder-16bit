@@ -25,8 +25,10 @@ import type { Session, Who } from '../app/session.js'
 interface Fake extends EventSourceLike {
   url: string
   closed: boolean
+  readyState: number
   emit(type: string, data: string, id?: string): void
   fail(): void
+  die(): void
 }
 
 /** Кто открывался, в каком порядке и что с ними стало. */
@@ -44,6 +46,7 @@ function записнаяКнижка(): {
         closed: false,
         onopen: null,
         onerror: null,
+        readyState: 1,
         addEventListener(type, listener) {
           const было = listeners.get(type) ?? []
           было.push(listener)
@@ -51,13 +54,23 @@ function записнаяКнижка(): {
         },
         close() {
           source.closed = true
+          source.readyState = 2
         },
         emit(type, data, id = '1') {
           for (const listener of listeners.get(type) ?? []) {
             listener({ data, lastEventId: id } as MessageEvent)
           }
         },
+        /** Обрыв: соединение живо, браузер переподключится сам. */
         fail() {
+          source.onerror?.(new Event('error'))
+        },
+        /**
+         * Смерть: ответ не-200 закрыл соединение навсегда. Ровно так
+         * выглядит 502 от шлюза, пока оболочка перезапускается.
+         */
+        die() {
+          source.readyState = 2
           source.onerror?.(new Event('error'))
         },
       }
@@ -85,6 +98,20 @@ function сессия(): { readonly session: Session; стать(who: Who): void
 const client = {
   url: () => '/api/events',
 } as unknown as Client
+
+/**
+ * Сколько ждать оживления в проверке.
+ *
+ * Заметно больше паузы самого оживления (2 с) — но проверка спит
+ * по-настоящему, и удлинять её сверх нужного значит платить этой
+ * секундой при каждом прогоне. Меньше нельзя: получилась бы проверка,
+ * зелёная от того, что не дождалась.
+ */
+const ЖДАТЬ_ОЖИВЛЕНИЯ_МС = 2600
+
+function пауза(мс: number): Promise<void> {
+  return new Promise((готово) => setTimeout(готово, мс))
+}
 
 test('пока неизвестно, кто пришёл, поток не открывается', () => {
   const книжка = записнаяКнижка()
@@ -172,6 +199,69 @@ test('повторный вход открывает поток заново', (
   // было бы нечем: ошибок нет, поток открыт, событий нет.
   книжка.открытые[1]?.emit('post.created', JSON.stringify({ postId: 'p2' }), '9')
   assert.equal(поток.last.value?.id, '9')
+})
+
+test('обрыв не переоткрывает поток: браузер чинит сам', async () => {
+  const книжка = записнаяКнижка()
+  const { session, стать } = сессия()
+
+  потокСессии(client, session, { open: книжка.open })
+  стать({
+    state: 'свой',
+    me: { userId: 'u1', nick: 'кто', displayName: 'Кто', role: 'USER' },
+  })
+  книжка.открытые[0]?.fail()
+
+  await пауза(ЖДАТЬ_ОЖИВЛЕНИЯ_МС)
+
+  // Своё переподключение поверх браузерного означало бы два механизма,
+  // спорящих друг с другом: два соединения на одну вкладку и события
+  // по два раза.
+  assert.equal(книжка.открытые.length, 1)
+  assert.equal(книжка.открытые[0]?.closed, false)
+})
+
+test('умерший поток оживает: 502 от шлюза не убивает обновления', async () => {
+  const книжка = записнаяКнижка()
+  const { session, стать } = сессия()
+
+  const поток = потокСессии(client, session, { open: книжка.open })
+  стать({
+    state: 'свой',
+    me: { userId: 'u1', nick: 'кто', displayName: 'Кто', role: 'USER' },
+  })
+
+  // Ровно то, что делает nginx, пока оболочка перезапускается: ответ
+  // не-200 закрывает EventSource навсегда.
+  книжка.открытые[0]?.die()
+  assert.equal(книжка.открытые.length, 1, 'оживление не должно быть мгновенным')
+
+  await пауза(ЖДАТЬ_ОЖИВЛЕНИЯ_МС)
+
+  assert.equal(книжка.открытые.length, 2, 'поток не переоткрылся')
+  // И новый питает те же сигналы: иначе оживление вернуло бы
+  // соединение, но не обновления.
+  книжка.открытые[1]?.emit('post.created', JSON.stringify({ postId: 'p9' }), '42')
+  assert.equal(поток.last.value?.id, '42')
+})
+
+test('умерший поток НЕ оживает после выхода', async () => {
+  const книжка = записнаяКнижка()
+  const { session, стать } = сессия()
+
+  потокСессии(client, session, { open: книжка.open })
+  стать({
+    state: 'свой',
+    me: { userId: 'u1', nick: 'кто', displayName: 'Кто', role: 'USER' },
+  })
+  книжка.открытые[0]?.die()
+  стать({ state: 'гость' })
+
+  await пауза(ЖДАТЬ_ОЖИВЛЕНИЯ_МС)
+
+  // Открыть поток гостю значило бы получить 401 и убить его тем же
+  // способом — то есть завести вечный цикл смерти и оживления.
+  assert.equal(книжка.открытые.length, 1)
 })
 
 test('обновление своей же сессии не рвёт поток', () => {
