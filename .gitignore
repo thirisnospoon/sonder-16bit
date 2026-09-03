@@ -41,3 +41,6 @@ target/
 /web/e2e/test-results/
 /web/e2e/playwright-report/
 /web/e2e/node_modules/
+
+# отчёты Lighthouse: порождаются замером, в версии не нужны
+/web/lighthouse/

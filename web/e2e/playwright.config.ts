@@ -25,7 +25,12 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [['list']],
   use: {
-    baseURL: process.env['SONDER_URL'] ?? 'http://127.0.0.1:8080',
+    baseURL: process.env['SONDER_URL'] ?? 'https://127.0.0.1:8443',
+    // Сертификат состава самоподписанный, и браузер ему не доверяет —
+    // правильно не доверяет. Идти по HTTP вместо этого нельзя: кука
+    // сессии объявлена `Secure`, и без TLS браузер выбросит её молча, а
+    // сценарии станут проверять вход, которого не было.
+    ignoreHTTPSErrors: true,
     // Скриншот и трасса только на падении: на зелёном прогоне это
     // мегабайты, которые никто не откроет.
     screenshot: 'only-on-failure',

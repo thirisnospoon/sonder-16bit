@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 IMAGE="mcr.microsoft.com/playwright:v1.45.0-jammy"
 CACHE_VOLUME="sonder-npm"
 NET="${SONDER_E2E_NET:-sonder_default}"
-URL="${SONDER_URL:-http://web:80}"
+URL="${SONDER_URL:-https://web:443}"
 
 # Проверяем, что система и правда поднята. Иначе Playwright упрётся в
 # отказ соединения и сообщит об этом так, что искать причину будут в

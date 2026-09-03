@@ -15,7 +15,33 @@ COPY web/src/ src/
 RUN npm run build
 
 FROM nginx:1.27-alpine
-COPY ops/compose/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Свой сертификат, выписанный при сборке образа.
+#
+# ЗАЧЕМ TLS В ЛОКАЛЬНОМ СОСТАВЕ. Контракт требует куку сессии с
+# `Secure`, а `Secure` по обычному HTTP браузер выбрасывает молча.
+# Значит, состав без TLS не проверяет тот путь, которым система пойдёт
+# в бою, — он проверяет соседний. Ровно поэтому в нём и стояло
+# `cookie-secure: false`: настройка, объяснявшая, чего проверка не
+# делает.
+#
+# Сертификат самоподписанный, и доверия ему нет никакого: браузер
+# выругается, `curl` потребует `-k`. Так и должно быть — он не выдаёт
+# себя за настоящий, он лишь включает тот же транспорт. Ключ рождается
+# при каждой сборке образа и в версию не попадает.
+RUN apk add --no-cache openssl \
+ && mkdir -p /etc/nginx/tls \
+ && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+      -subj "/CN=localhost" \
+      -addext "subjectAltName=DNS:localhost,DNS:web,IP:127.0.0.1" \
+      -keyout /etc/nginx/tls/key.pem \
+      -out /etc/nginx/tls/cert.pem \
+ && chmod 600 /etc/nginx/tls/key.pem
+
+# ШАБЛОН, а не готовый конфиг: официальный образ прогоняет
+# `/etc/nginx/templates/*.template` через envsubst при запуске. Так
+# публичный адрес задаётся составом, а не зашивается в образ.
+COPY ops/compose/nginx.conf /etc/nginx/templates/default.conf.template
 COPY web/index.html web/styles.css /usr/share/nginx/html/
 COPY --from=build /web/build /usr/share/nginx/html/build
-EXPOSE 80
+EXPOSE 80 443
