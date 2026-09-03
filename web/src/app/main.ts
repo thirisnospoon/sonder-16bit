@@ -112,7 +112,12 @@ function страница(): Child {
     case 'регистрация':
       return страницаВхода(session, router, 'регистрация', client)
     case 'профиль':
-      return страницаПрофиля(client, session, текущий.params['nick'] ?? '')
+      return страницаПрофиля(
+        client,
+        session,
+        router,
+        текущий.params['nick'] ?? '',
+      )
     case 'пост':
       return страницаПоста(
         client,

@@ -8,6 +8,8 @@
 import { h, when, type Child } from '../core/dom.js'
 import { ApiFailure, ApiUnreachable } from '../core/api.js'
 import type { ReadSignal } from '../core/reactive.js'
+import type { Router } from '../core/router.js'
+import type { PageName } from './routes.js'
 import { ERROR_META, type ErrorCode } from '../generated/errors.js'
 
 /**
@@ -98,6 +100,36 @@ export function пусто(текст: string, подсказка?: string): Chi
     { class: 'пусто' },
     h('p', null, текст),
     подсказка === undefined ? null : h('p', { class: 'подпись' }, подсказка),
+  )
+}
+
+/**
+ * Первый экран для того, кто ещё не вошёл.
+ *
+ * Приглашение, а не отказ. Отсутствие сессии у первого встречного — это
+ * норма, а не сбой; говорить с ним языком ошибок значит выдавать
+ * устройство системы за его вину.
+ */
+export function приглашение(
+  router: Router<PageName>,
+  заголовок: string,
+  пояснение: string,
+): Node {
+  return h(
+    'div',
+    { class: 'карточка' },
+    h('h2', { class: 'заголовок заголовок--малый' }, заголовок),
+    h('p', { class: 'подпись' }, пояснение),
+    h(
+      'div',
+      { class: 'приглашение__ряд' },
+      h('a', { class: 'кнопка', href: router.href('вход') }, 'Войти'),
+      h(
+        'a',
+        { class: 'кнопка кнопка--тихая', href: router.href('регистрация') },
+        'Завести учётную запись',
+      ),
+    ),
   )
 }
 

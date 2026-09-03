@@ -34,7 +34,10 @@ async function проверить(page: Page): Promise<void> {
 
 test('лента гостя доступна', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Войти' }).waitFor()
+  // Ждём приглашение, а не кнопку входа: кнопок «Войти» на этом экране
+  // две — в шапке и в приглашении, — и ожидание по имени попало бы в
+  // обе сразу.
+  await page.getByText('Здесь ваша лента').waitFor()
   await проверить(page)
 })
 

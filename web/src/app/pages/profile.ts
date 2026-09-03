@@ -11,16 +11,19 @@ import { h, when, type Child } from '../../core/dom.js'
 import { signal } from '../../core/reactive.js'
 import type { Client } from '../../core/api.js'
 import type { UserProfile } from '../../generated/api.js'
-import type { Session } from '../session.js'
-import { отказ, пусто } from '../parts.js'
+import type { Router } from '../../core/router.js'
+import type { PageName } from '../routes.js'
+import { толькоСвоим, type Session } from '../session.js'
+import { отказ, приглашение, пусто } from '../parts.js'
 
 export function страницаПрофиля(
   client: Client,
   session: Session,
+  router: Router<PageName>,
   nick: string,
 ): Child {
   const профиль = signal<UserProfile | null>(null)
-  const идёт = signal(true)
+  const идёт = signal(false)
   const ошибка = signal<unknown>(null)
   const меняем = signal(false)
 
@@ -37,7 +40,15 @@ export function страницаПрофиля(
     }
   }
 
-  void загрузить()
+  толькоСвоим(
+    session,
+    () => void загрузить(),
+    () => {
+      профиль.value = null
+      идёт.value = false
+      ошибка.value = null
+    },
+  )
 
   async function переключить(): Promise<void> {
     const текущий = профиль.value
@@ -69,9 +80,22 @@ export function страницаПрофиля(
     'main',
     { class: 'полоса', id: 'содержимое' },
     () => (ошибка.value === null ? null : отказ(ошибка.value)),
+    when(
+      () => session.who.value.state === 'гость',
+      () =>
+        приглашение(
+          router,
+          'Профили видны вошедшим',
+          'Кто на кого подписан — сведения о людях, и открыты они не ' +
+            'всякому. Войдите, чтобы посмотреть.',
+        ),
+    ),
     () => {
       const данные = профиль.value
       if (данные === null) {
+        if (session.who.value.state !== 'свой') {
+          return null
+        }
         return идёт.value
           ? пусто('Загружаем…')
           : ошибка.value === null

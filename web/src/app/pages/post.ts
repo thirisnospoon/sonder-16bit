@@ -14,9 +14,9 @@ import { signal } from '../../core/reactive.js'
 import type { Client } from '../../core/api.js'
 import type { Post } from '../../generated/api.js'
 import type { Router } from '../../core/router.js'
-import type { Session } from '../session.js'
+import { толькоСвоим, type Session } from '../session.js'
 import type { PageName } from '../routes.js'
-import { когда, отказ, пусто } from '../parts.js'
+import { когда, отказ, приглашение, пусто } from '../parts.js'
 
 export function страницаПоста(
   client: Client,
@@ -25,7 +25,7 @@ export function страницаПоста(
   postId: string,
 ): Child {
   const пост = signal<Post | null>(null)
-  const идёт = signal(true)
+  const идёт = signal(false)
   const ошибка = signal<unknown>(null)
   const удаляем = signal(false)
 
@@ -42,7 +42,15 @@ export function страницаПоста(
     }
   }
 
-  void загрузить()
+  толькоСвоим(
+    session,
+    () => void загрузить(),
+    () => {
+      пост.value = null
+      идёт.value = false
+      ошибка.value = null
+    },
+  )
 
   async function удалить(): Promise<void> {
     if (удаляем.value) {
@@ -74,9 +82,22 @@ export function страницаПоста(
     'main',
     { class: 'полоса', id: 'содержимое' },
     () => (ошибка.value === null ? null : отказ(ошибка.value)),
+    when(
+      () => session.who.value.state === 'гость',
+      () =>
+        приглашение(
+          router,
+          'Пост виден вошедшим',
+          'Ссылка рабочая — но записи в этой системе открыты только ' +
+            'своим. Войдите, и она откроется.',
+        ),
+    ),
     () => {
       const данные = пост.value
       if (данные === null) {
+        if (session.who.value.state !== 'свой') {
+          return null
+        }
         return идёт.value
           ? пусто('Загружаем…')
           : ошибка.value === null

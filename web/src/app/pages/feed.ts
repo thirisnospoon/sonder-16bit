@@ -16,10 +16,10 @@ import { LIMITS } from '../../generated/limits.js'
 import type { Client } from '../../core/api.js'
 import type { FeedPage, Post } from '../../generated/api.js'
 import type { Router } from '../../core/router.js'
-import type { Session } from '../session.js'
+import { толькоСвоим, type Session } from '../session.js'
 import type { Stream } from '../../core/stream.js'
 import type { PageName } from '../routes.js'
-import { когда, метка, отказ, пусто } from '../parts.js'
+import { когда, метка, отказ, приглашение, пусто } from '../parts.js'
 
 export function страницаЛенты(
   client: Client,
@@ -30,7 +30,7 @@ export function страницаЛенты(
   const посты = signal<readonly Post[]>([])
   const дальше = signal<string | undefined>(undefined)
   const ещё = signal(false)
-  const идёт = signal(true)
+  const идёт = signal(false)
   const ошибка = signal<unknown>(null)
   const новых = signal(0)
 
@@ -56,7 +56,18 @@ export function страницаЛенты(
     }
   }
 
-  void загрузить()
+  толькоСвоим(
+    session,
+    () => void загрузить(),
+    () => {
+      посты.value = []
+      дальше.value = undefined
+      ещё.value = false
+      новых.value = 0
+      идёт.value = false
+      ошибка.value = null
+    },
+  )
 
   /**
    * Свои посты, о которых ещё не пришло событие.
@@ -166,10 +177,27 @@ export function страницаЛенты(
       'header',
       { style: { display: 'flex', 'align-items': 'baseline', gap: '12px' } },
       h('h1', { class: 'заголовок' }, 'Лента'),
-      метка(stream.open),
+      // Гостю метка не показывается вовсе. «Обновления не приходят» —
+      // правда, но правда бессмысленная: потока у него нет и быть не
+      // должно, а выглядит это как неисправность.
+      when(
+        () => session.who.value.state === 'свой',
+        () => метка(stream.open),
+      ),
     ),
 
     () => (ошибка.value === null ? null : отказ(ошибка.value)),
+
+    when(
+      () => session.who.value.state === 'гость',
+      () =>
+        приглашение(
+          router,
+          'Здесь ваша лента',
+          'Лента собирается из тех, на кого вы подписаны, — поэтому она ' +
+            'своя у каждого. Войдите, чтобы увидеть свою.',
+        ),
+    ),
 
     when(
       () => session.who.value.state === 'свой',
@@ -243,7 +271,10 @@ export function страницаЛенты(
     ),
 
     () =>
-      посты.value.length === 0 && !идёт.value && ошибка.value === null
+      session.who.value.state === 'свой' &&
+      посты.value.length === 0 &&
+      !идёт.value &&
+      ошибка.value === null
         ? пусто(
             'Здесь пока пусто.',
             'Подпишитесь на кого-нибудь — и лента наполнится.',
