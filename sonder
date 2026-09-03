@@ -222,6 +222,8 @@ cmd_verify() {
   cmd_check_drift         || rc=1
   cmd_check_generated     || rc=1
   cmd_check_node          || rc=1
+  cmd_check_budgets       || rc=1
+  cmd_check_layers        || rc=1
   cmd_test                || rc=1
   # Java входит в verify с самого начала. Проверка, охватывающая половину
   # кодовой базы, уже один раз позволила регрессии просидеть несколько
@@ -255,10 +257,68 @@ cmd_check_generated() {
 # Собирается она при этом только под i8086 — на нативном таргете нет ни
 # часов BIOS, ни портов, — поэтому обычный дуальный прогон её не
 # трогает, и без отдельного шага она тихо перестала бы собираться.
+# Граф модулей Pascal: без циклов и без рёбер вверх.
+#
+# Паскалевский двойник ArchUnit. Для Java правило «домен не знает о
+# Spring, JDBC и JAX-WS» проверялось с самого начала; для Pascal — где
+# домен и живёт — такого правила не было, хотя здесь оно и главное:
+# ядро есть чистая функция, и ввода-вывода в нём нет ПО ПОСТРОЕНИЮ.
+# Утверждение это ничем не подкреплялось: дописать TcPort в uses
+# доменного модуля собралось бы молча.
+cmd_check_layers() {
+  need_docker
+  step "граф модулей Pascal"
+  run_py python ops/ci/check-layers.py || return 1
+}
+
+# Бюджеты TURBOCORE §12 против констант кода.
+#
+# Три строки таблицы бюджетов помечены словами «проверка в CI», и
+# проверки не было ни для одной: бюджет жил утверждением. Бюджет без
+# проверки хуже отсутствующего — отсутствующий заставляет думать при
+# каждом изменении, а заявленный и непроверяемый создаёт уверенность,
+# что кто-то следит.
+cmd_check_budgets() {
+  need_docker
+  step "бюджеты TURBOCORE §12"
+  run_py python ops/ci/check-budgets.py || return 1
+}
+
+# Бюджет размера бинарника NODE-7, байт.
+#
+# 400 КБ объявлены в TURBOCORE.md §12 с пометкой «проверка в CI», и
+# проверки этой не было: бюджет существовал утверждением. Найдено
+# сверкой таблицы гейтов с действительностью, а не превышением — и это
+# ровно тот случай, ради которого сверку и делают.
+#
+# Откуда предел. Программа целиком загружается в память под DOS, где её
+# ждут 640 КБ на всё вместе с самой ОС; за 400 КБ остаётся слишком мало
+# на дальнюю кучу, которой нужно 599 КБ под стеки файберов и арены
+# каналов. Превышение означает не «файл потолстел», а «места под данные
+# больше нет».
+NODE7_MAX_BYTES=409600
+
 cmd_check_node() {
   ensure_dos
   step "NODE-7 собирается под i8086-msdos"
   run_dos bash -c 'bash dosnode/build/build.sh --target msdos       --main dosnode/src/node7.pas --out NODE7 --outdir node'     || return 1
+
+  local exe="$ROOT/dosnode/build/out/msdos-node/NODE7.EXE"
+  if [ ! -f "$exe" ]; then
+    echo "    СБОРКА НЕ ОСТАВИЛА БИНАРНИКА: $exe" >&2
+    return 1
+  fi
+
+  # `wc -c`, а не `stat`: у GNU и BSD разные флаги, и проверка не должна
+  # зависеть от того, чей coreutils подвернулся.
+  local bytes
+  bytes=$(wc -c < "$exe" | tr -d ' ')
+  local pct=$(( bytes * 100 / NODE7_MAX_BYTES ))
+  echo "    размер: $bytes Б из $NODE7_MAX_BYTES ($pct % бюджета)"
+  if [ "$bytes" -gt "$NODE7_MAX_BYTES" ]; then
+    echo "    БЮДЖЕТ РАЗМЕРА ПРЕВЫШЕН (TURBOCORE.md §12)" >&2
+    return 1
+  fi
 }
 
 # Тесты TurboCore на обоих таргетах. Расхождение между ними — дефект,
@@ -528,7 +588,9 @@ Sonder — цели
   contracts-selftest   убедиться, что валидатор ловит дефекты
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
-  check-node           собрать NODE-7 под i8086-msdos
+  check-node           собрать NODE-7 под i8086-msdos и сверить размер
+  check-budgets        бюджеты TURBOCORE §12 против констант кода
+  check-layers         граф модулей Pascal: без циклов и рёбер вверх
   e2e                  сквозной прогон: гейтвей против настоящей ноды
   soak-total           сколько накоплено фаззинга из требуемых суток
   drain-bench [N]      замер: за сколько разберётся завал из N событий
@@ -572,6 +634,8 @@ case "${1:-help}" in
   soak)               shift; need_docker; cmd_soak "$@" ;;
   soak-total)         cmd_soak_total ;;
   check-node)         need_docker; cmd_check_node ;;
+  check-budgets)      cmd_check_budgets ;;
+  check-layers)       cmd_check_layers ;;
   e2e)                need_docker; cmd_e2e ;;
   lighthouse)         cmd_lighthouse ;;
   trace)              cmd_trace ;;

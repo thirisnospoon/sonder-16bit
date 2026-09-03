@@ -45,6 +45,14 @@ jobs:
       - name: Самопроверка валидатора
         run: python tools/validate-contracts/selftest.py
 
+      # Читают исходники Pascal и не требуют ни тулчейна, ни эмулятора,
+      # поэтому стоят здесь, среди быстрых проверок, а не в сборке ноды.
+      - name: Бюджеты TURBOCORE §12 против констант кода
+        run: python ops/ci/check-budgets.py
+
+      - name: Граф модулей Pascal
+        run: python ops/ci/check-layers.py
+
       - name: Кодогенерация
         run: |
           python tools/gen-errors/gen_errors.py
