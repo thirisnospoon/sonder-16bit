@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Возвращается ли система сама после отказа части.
+#
+# Два отказа, и оба настоящие: часть выключается по-живому, а не
+# имитируется заглушкой. Проверяется одно — вернулась ли система БЕЗ
+# вмешательства и за разумный срок.
+#
+#   1. ПЕРЕЗАПУСК БАЗЫ. Пул держит соединения открытыми, и после
+#      перезапуска Firebird все они мертвы. Ненастроенный пул раздавал
+#      бы мёртвые, пока кто-нибудь не перезапустит приложение.
+#
+#   2. ПЕРЕЗАПУСК ОБОЛОЧКИ. Рвёт нульмодем к ядру. Нода переподключиться
+#      не может — эмулятор идёт на порт один раз при старте, — и до
+#      биения линии не возвращалась НИКОГДА: контейнер жив, DOSBox
+#      работает, команд больше нет.
+#
+# Снаружи оба отказа выглядят одинаково и одинаково обманчиво: система
+# поднята и отвечает отказом на всё. Ради этого сходства проверка и
+# существует.
+#
+# ИМЕНА ПЕРЕМЕННЫХ И ФУНКЦИЙ ЛАТИНИЦЕЙ. Кириллица в идентификаторе
+# bash — не ошибка присваивания, а «command not found»: скрипт
+# продолжает работать с пустой переменной. Первая редакция этого
+# файла на том и споткнулась, ровно как точка входа ноды до неё.
+#
+# Не в verify: требует поднятого состава и двух минут. Гоняется отдельно
+# — `./sonder chaos`.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+URL="${SONDER_URL:-https://localhost:8443}"
+PASSWORD='достаточно-длинный-пароль'
+
+# Сроки. База — секунды: пул обязан заметить и переоткрыть. Ядро —
+# минуты: тридцать секунд на распознавание молчания плюс перезапуск
+# контейнера, ожидание порта и подъём эмулятора. Измерено: 60 с.
+DB_DEADLINE="${SONDER_CHAOS_DB_SECONDS:-60}"
+NODE_DEADLINE="${SONDER_CHAOS_NODE_SECONDS:-150}"
+
+cd "$ROOT" || exit 1
+
+fail() { echo; echo "ПРОВАЛ: $*" >&2; exit 1; }
+
+# Регистрация — команда, и идёт она через ВСЮ цепочку: HTTP, база,
+# линия, ядро, снова база. Проверять чтением нельзя: оно не трогает ни
+# ядра, ни записи, и зеленело бы при мёртвой линии.
+command_once() {
+  curl -sk -o /dev/null -w '%{http_code}' -X POST "$URL/api/users" \
+    -H 'Content-Type: application/json' \
+    -d "{\"nick\":\"ch$(date +%s%N | tail -c 9)\",\"displayName\":\"Хаос\",\"password\":\"$PASSWORD\"}"
+}
+
+wait_back() {
+  local limit="$1" started elapsed code
+  started=$(date +%s)
+  while :; do
+    code=$(command_once)
+    if [ "$code" = 201 ]; then
+      echo $(( $(date +%s) - started ))
+      return 0
+    fi
+    elapsed=$(( $(date +%s) - started ))
+    if [ "$elapsed" -ge "$limit" ]; then
+      echo "$elapsed"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+echo "==> исходное состояние"
+CODE=$(command_once)
+[ "$CODE" = 201 ] || fail "система не работает ДО отказа: команда ответила $CODE"
+echo "  команда проходит"
+
+echo
+echo "==> отказ 1: перезапуск базы"
+docker compose restart db > /dev/null 2>&1 || fail "не перезапустить базу"
+if TOOK=$(wait_back "$DB_DEADLINE"); then
+  echo "  вернулась сама за $TOOK с (предел $DB_DEADLINE)"
+else
+  docker compose logs app --since 2m 2>&1 | tail -10 >&2
+  fail "база перезапущена, система не вернулась за $DB_DEADLINE с"
+fi
+
+echo
+echo "==> отказ 2: перезапуск оболочки — линия к ядру рвётся"
+docker compose restart app > /dev/null 2>&1 || fail "не перезапустить оболочку"
+if TOOK=$(wait_back "$NODE_DEADLINE"); then
+  echo "  вернулась сама за $TOOK с (предел $NODE_DEADLINE)"
+else
+  docker compose logs node --since 3m 2>&1 | tail -10 >&2
+  fail "оболочка перезапущена, ядро не вернулось за $NODE_DEADLINE с"
+fi
+
+echo
+echo "==> здоровье после всего"
+HEALTH=$(docker compose exec -T app \
+  curl -sf http://127.0.0.1:8080/actuator/health 2>/dev/null)
+echo "$HEALTH" | grep -q '"node":{"status":"UP"' \
+  || fail "ядро не отвечает на опрос: $HEALTH"
+echo "$HEALTH" | grep -q '"db":{"status":"UP"' \
+  || fail "база не отвечает: $HEALTH"
+echo "  база UP, ядро UP"
+
+echo
+echo "система вернулась сама после обоих отказов"

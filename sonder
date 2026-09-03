@@ -471,6 +471,20 @@ cmd_bench() {
   bash ops/ci/bench.sh || return 1
 }
 
+# Возвращается ли система сама после отказа части.
+#
+# Два отказа по-живому: перезапуск базы и перезапуск оболочки, рвущий
+# линию к ядру. Снаружи оба выглядят одинаково обманчиво — система
+# поднята и отвечает отказом на всё, — и ради этого сходства проверка и
+# существует.
+#
+# Не в verify: требует поднятого состава и двух минут.
+cmd_chaos() {
+  need_docker
+  step "отказ и возвращение"
+  bash ops/ci/chaos.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -637,6 +651,7 @@ Sonder — цели
   e2e-web              сценарии в браузере против поднятой системы
   lighthouse           замер Lighthouse: три прогона, медиана, порог 90
   trace                сквозной след: заголовок, оболочка, NODE-7, outbox
+  chaos                отказ базы и оболочки: возвращается ли система сама
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -668,6 +683,7 @@ case "${1:-help}" in
   e2e)                need_docker; cmd_e2e ;;
   lighthouse)         cmd_lighthouse ;;
   trace)              cmd_trace ;;
+  chaos)              cmd_chaos ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
