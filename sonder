@@ -323,6 +323,22 @@ cmd_up() {
   docker compose up --build "$@"
 }
 
+# Наблюдаемость: сборщик метрик и панель.
+#
+# Профилем compose, а не всегда: дежурному она нужна, а правящему ленту
+# — нет, и два лишних контейнера на каждый подъём означают лишнюю
+# память и лишние секунды. Гейт Ф10 требует, чтобы ОДНОЙ командой
+# поднималась рабочая система, и она поднимается; панели — отдельная
+# просьба.
+cmd_obs() {
+  need_docker
+  step "наблюдаемость: Prometheus и Grafana"
+  docker compose --profile obs up --build -d "$@" || return 1
+  echo
+  echo "  панель:  http://127.0.0.1:${SONDER_GRAFANA_PORT:-3000}/d/sonder"
+  echo "  сборщик: http://127.0.0.1:${SONDER_PROM_PORT:-9090}"
+}
+
 cmd_down() {
   need_docker
   step "остановка"
@@ -504,6 +520,7 @@ Sonder — цели
   java-it              интеграционные тесты оболочки против Firebird
   web [цель]           сборка и тесты фронта; lock — пересчёт замка зависимостей
   up                   поднять систему целиком: база, оболочка, NODE-7, фронт
+  obs                  сборщик метрик и панель поверх поднятой системы
   e2e-web              сценарии в браузере против поднятой системы
   lighthouse           замер Lighthouse: три прогона, медиана, порог 90
   trace                сквозной след: заголовок, оболочка, NODE-7, outbox
@@ -542,6 +559,7 @@ case "${1:-help}" in
   java-it)            need_docker; cmd_java_it ;;
   web)                shift; cmd_web "$@" ;;
   up)                 shift; cmd_up "$@" ;;
+  obs)                shift; cmd_obs "$@" ;;
   e2e-web)            cmd_e2e_web ;;
   down)               shift; cmd_down "$@" ;;
   clean)              cmd_clean ;;

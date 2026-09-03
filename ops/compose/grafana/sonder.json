@@ -1,0 +1,269 @@
+{
+  "title": "Sonder",
+  "uid": "sonder",
+  "tags": [
+    "sonder"
+  ],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "description": "Три вопроса, которые задаёт устройство этой системы: близко ли ядро к пределу арены, отстаёт ли проекция, жива ли линия. Панель, отвечающая на другие вопросы, была бы панелью другой системы.",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Очередь outbox: расстояние между «принято» и «читатель увидит»",
+      "description": "Это и есть отставание проекции в событиях. Ноль — всё разобрано; растущая линия означает, что дренаж не поспевает за записью.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 10000
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sonder_outbox_pending_events{application=\"sonder-core\"}",
+          "legendFormat": "ждёт публикации",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Арена ядра: пик против ёмкости",
+      "description": "Пик БЕЗ ёмкости не значит ничего — 1738 байт это катастрофа при ёмкости 2048 и пустяк при 65536. Поэтому обе линии на одном поле. Значение -1 означает, что ответа от ноды нет вовсе.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ёмкость"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sonder_node_arena_peak_bytes{application=\"sonder-core\"}",
+          "legendFormat": "пик",
+          "refId": "A"
+        },
+        {
+          "expr": "sonder_node_arena_capacity_bytes{application=\"sonder-core\"}",
+          "legendFormat": "ёмкость",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Линия: байты в обе стороны",
+      "description": "Отличает «команд нет» от «команды не проходят»: снаружи это выглядит одинаково. Полка на обеих линиях при живом трафике HTTP означает, что ядро потеряно.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(sonder_node_line_rx_bytes_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "принято ядром",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(sonder_node_line_tx_bytes_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "отправлено ядром",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Решения ядра и ошибки линии",
+      "description": "Отказы — норма: правила домена на то и есть. Растущие «не разобралось» или «ошибки линии» — не норма: первое означает расхождение сторон, второе порчу на проводе.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(sonder_node_commands_served_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "обслужено",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(sonder_node_commands_refused_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "отвергнуто",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(sonder_node_commands_malformed_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "не разобралось",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(sonder_node_line_errors_total{application=\"sonder-core\"}[1m])",
+          "legendFormat": "ошибки линии",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Запись против чтения: время ответа",
+      "description": "Потолок записи принадлежит линии и измерен: 21,5 команды в секунду (docs/BENCHMARK.md). Чтение линию не трогает и держит на порядок больше — расхождение линий на этой панели и есть устройство системы, а не неполадка.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 2
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(http_server_requests_seconds_bucket{application=\"sonder-core\",method=~\"POST|PUT|DELETE\"}[1m])))",
+          "legendFormat": "запись p95 {{method}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"sonder-core\",method=\"GET\"}[1m])))",
+          "legendFormat": "чтение p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Свежесть ответа ядра",
+      "description": "Счётчики ядра обновляются раз в пятнадцать секунд — опрос идёт по той же линии, что и команды, и спрашивать чаще значит отнимать её у дела. Поэтому на графиках ядра ступеньки. Эта панель отличает ступеньку от остановки: растущая линия означает, что ответа нет. Разрыв — что ответа не было ни разу.",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 35
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sonder_node_probe_age_seconds{application=\"sonder-core\"}",
+          "legendFormat": "возраст ответа",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

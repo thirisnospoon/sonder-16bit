@@ -123,5 +123,61 @@ services:
       - "${SONDER_WEB_PORT:-8080}:80"
       - "${SONDER_WEB_TLS_PORT:-8443}:443"
 
+  # --- НАБЛЮДАЕМОСТЬ ------------------------------------------------
+  #
+  # Профилем `obs`, а не всегда. Дежурному она нужна, разработчику при
+  # правке ленты — нет, а два лишних контейнера на каждый `up` означают
+  # лишнюю память и лишние секунды на подъём. Гейт Ф10 требует, чтобы
+  # ОДНОЙ командой поднималась рабочая система, и она поднимается;
+  # панели — отдельная просьба:
+  #
+  #   docker compose --profile obs up -d
+  #
+  # Наружу они не выходят дальше localhost и без пароля: это локальный
+  # состав, а не боевой. В бою и сборщик, и панель стоят за той же
+  # аутентификацией, что и всё остальное.
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: [obs]
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./ops/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Двое суток: локальный состав держат поднятым день-два, а год
+      # истории занял бы больше места, чем весь проект.
+      - --storage.tsdb.retention.time=2d
+    ports:
+      - "${SONDER_PROM_PORT:-9090}:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: [obs]
+    depends_on:
+      - prometheus
+    environment:
+      # Вход без пароля — ОСОЗНАННО и только здесь. Пароль в файле
+      # compose был бы паролем в версии, то есть хуже отсутствия: он
+      # выглядит защитой и ею не является.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      # Открывается сразу на панели: искать её в списке из одной
+      # позиции — работа, которой можно не быть.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/sonder.json
+    volumes:
+      - ./ops/compose/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./ops/compose/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./ops/compose/grafana/sonder.json:/etc/grafana/provisioning/dashboards/sonder.json:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${SONDER_GRAFANA_PORT:-3000}:3000"
+
 volumes:
   db-data:
+  prom-data:
+  grafana-data:

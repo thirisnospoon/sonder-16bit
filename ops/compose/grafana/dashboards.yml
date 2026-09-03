@@ -1,0 +1,18 @@
+# Откуда Grafana берёт панели.
+#
+# Из файлов, а не из своей базы: панель, нарисованная мышью, живёт до
+# первого пересоздания тома и не попадает в версию. Панель в файле
+# читается на ревью и меняется тем же способом, что и код.
+
+apiVersion: 1
+
+providers:
+  - name: sonder
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

@@ -43,12 +43,27 @@
       проверке живости — и вдобавок обошла бы сверку маршрутов с
       OpenAPI, потому что лежала бы вне пакета, который та смотрит.
 
-      Скрейпинг Prometheus — фаза 10; сюда он придёт как реестр
-      micrometer, не потребовав ничего переписывать.
+      Скрейпинг Prometheus пришёл в фазе 10 ровно так, как обещано:
+      реестром micrometer, не потребовав переписать ни строки.
     -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <!--
+      Реестр Prometheus. Отдельной зависимостью, а не через стартер:
+      актуатор приносит micrometer-core, а формат выдачи — уже выбор, и
+      выбор этот стоит одной библиотеки без транзитивных.
+
+      ВЕРСИЯ НЕ ЗАДАНА НАМЕРЕННО: её задаёт spring-boot-dependencies, и
+      прописанная рядом однажды разойдётся с micrometer-core, который
+      придёт от актуатора. Две версии одного micrometer в classpath дают
+      NoSuchMethodError на старте — то есть отказ подняться, а не тихую
+      неполадку, и всё же чинить его пришлось бы вслепую.
+    -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
     </dependency>
     <!--
       Только криптографический модуль Spring Security, не весь стартер.
