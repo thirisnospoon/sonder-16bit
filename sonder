@@ -137,6 +137,12 @@ cmd_codegen() {
   run_dos bash ops/ci/gen-frames.sh || return 1
   step "эталонные ответы ядра"
   run_dos bash ops/ci/gen-replies.sh || return 1
+
+  step "типы веба из OpenAPI"
+  run_py python tools/gen-api-types/gen_api_types.py || return 1
+
+  step "типы событий для веба"
+  run_py python tools/gen-api-types/gen_events.py || return 1
 }
 
 # Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
@@ -199,6 +205,10 @@ cmd_verify() {
   # кодовой базы, уже один раз позволила регрессии просидеть несколько
   # коммитов: локально гонялись тесты, в CI — всё остальное.
   cmd_java                || rc=1
+  # Фронт входит в общую проверку по той же причине, что и Java:
+  # проверка, охватывающая половину кодовой базы, уже один раз позволила
+  # регрессии просидеть несколько коммитов.
+  cmd_web                 || rc=1
   echo
   if [ "$rc" -eq 0 ]; then
     echo "все проверки пройдены"
@@ -295,6 +305,15 @@ cmd_java_it() {
 # Долгий прогон фаззеров XML и кадрирования. В verify не входит: гейт
 # требует суток, а проверка перед коммитом обязана укладываться в минуты.
 # Аргументы прокидываются в dosnode/fuzz/soak.sh как есть.
+cmd_web() {
+  need_docker
+  step "фронт: сборка и тесты"
+  # Отдельным скриптом, а не строкой здесь: те же команды нужны и в CI,
+  # и вызывать их оттуда через ./sonder значило бы завести зависимость
+  # от этого файла ради двух строк.
+  bash ops/ci/web.sh "${1:-test}" || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -424,6 +443,7 @@ Sonder — цели
   soak [args]          долгий фаззинг XML и кадров, по умолчанию 5 минут
   java [цели]          сборка и тесты оболочки, по умолчанию verify
   java-it              интеграционные тесты оболочки против Firebird
+  web [цель]           сборка и тесты фронта; lock — пересчёт замка зависимостей
   clean                удалить сборочные артефакты
 
 Состояние: фаза 0 пройдена, фаза 1 в работе.
@@ -452,6 +472,7 @@ case "${1:-help}" in
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
+  web)                shift; cmd_web "$@" ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
   *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;
