@@ -77,10 +77,15 @@ cmd_check_eol() {
   # подряд, и отличить это от настоящей поломки с одного взгляда нельзя.
   local cr
   cr="$(printf '\015')"
+  # Отбор идёт по признаку ТЕКСТОВОСТИ, а не по eol. В .gitattributes
+  # стоит `* text=auto eol=lf`, и eol остаётся выставленным даже у файлов,
+  # помеченных binary: проверка полезла бы в эталонные кадры линии и
+  # нашла бы там байт 0x0D, потому что это байт данных, а не перевод
+  # строки.
   local bad
   bad=$(git ls-files \
-        | git check-attr --stdin eol \
-        | sed -n 's/: eol: lf$//p' \
+        | git check-attr --stdin text \
+        | sed -n 's/: text: \(auto\|set\)$//p' \
         | while IFS= read -r f; do
             if [ -f "$f" ] && grep -qU "$cr" "$f"; then echo "$f"; fi
           done)
@@ -116,6 +121,13 @@ cmd_codegen() {
   run_py python tools/gen-limits/gen_limits.py || return 1
   step "стабы Pascal из WSDL"
   run_py python tools/wsdl2pas/wsdl2pas.py || return 1
+  # Эталонные кадры порождает НАСТОЯЩИЙ кодировщик ядра, поэтому здесь
+  # нужен образ тулчейна, а не питона. Устаревший эталон опаснее
+  # отсутствующего: проверка на стороне Java осталась бы зелёной,
+  # сверяясь с прошлым.
+  ensure_dos
+  step "эталонные кадры линии"
+  run_dos bash ops/ci/gen-frames.sh || return 1
 }
 
 # Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
