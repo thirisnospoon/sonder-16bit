@@ -14,6 +14,9 @@ import { createSession } from './session.js'
 import { PAGES } from './routes.js'
 import { страницаВхода } from './pages/login.js'
 import { страницаЛенты } from './pages/feed.js'
+import { страницаПрофиля } from './pages/profile.js'
+import { страницаПоста } from './pages/post.js'
+import { страницаМодерации } from './pages/moderation.js'
 import { пусто } from './parts.js'
 
 const client = createClient('/api')
@@ -71,6 +74,13 @@ function правыйУголШапки(): Child {
         },
         кто.me.displayName,
       ),
+      кто.me.role === 'USER'
+        ? null
+        : h(
+            'a',
+            { class: 'подпись', href: router.href('модерация') },
+            'Модерация',
+          ),
       h(
         'button',
         {
@@ -101,6 +111,20 @@ function страница(): Child {
       return страницаВхода(session, router, 'вход', client)
     case 'регистрация':
       return страницаВхода(session, router, 'регистрация', client)
+    case 'профиль':
+      return страницаПрофиля(client, session, текущий.params['nick'] ?? '')
+    case 'пост':
+      return страницаПоста(
+        client,
+        session,
+        router,
+        текущий.params['postId'] ?? '',
+      )
+    case 'модерация':
+      // Право модерировать проверяет ядро. Страница показывается всем
+      // вошедшим, и отказ на ней — обычный исход, а не неожиданность:
+      // спрятанная кнопка защитой не является.
+      return страницаМодерации(client)
     default:
       return h(
         'main',
