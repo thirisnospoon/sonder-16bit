@@ -276,6 +276,35 @@ class LineTransportWiringTest {
     }
 
     @Test
+    @DisplayName("на приветствие приходит ответ, иначе нода не заметит обрыва")
+    void helloIsAnswered() {
+        // Нода не умеет переподключаться: нульмодем эмулятора идёт на
+        // порт один раз при старте. Обрыв она замечает по отсутствию
+        // ответа на приветствие — другого признака у неё нет, потому что
+        // своей волей гейтвей не шлёт ничего. Без ответа перезапуск
+        // оболочки оставляет ноду живой и бесполезной.
+        runner()
+                .withPropertyValues(
+                        "sonder.decider.line.port=0",
+                        "sonder.decider.line.timeout-ms=2000")
+                .run(context -> {
+                    LineTransport line = context.getBean(LineTransport.class);
+
+                    try (FakeNode node = new FakeNode(line.getPort(), null)) {
+                        await(line::isConnected, "нода не подключилась");
+
+                        node.hello();
+
+                        await(() -> node.hellosBack() > 0,
+                                "гейтвей не ответил на приветствие: нода не "
+                                        + "отличит мёртвую линию от тихой");
+                        await(() -> line.getHellos() > 0,
+                                "приветствие не дошло до транспорта");
+                    }
+                });
+    }
+
+    @Test
     @DisplayName("часы сами доводят опрос до ноды, и здоровье становится UP")
     void probeReachesTheNodeOnItsOwn() {
         // Опрос, который никто не запускает, — это те же метрики, до
@@ -356,6 +385,7 @@ class LineTransportWiringTest {
         private final CountDownLatch stopped = new CountDownLatch(1);
         private volatile long got;
         private volatile int pings;
+        private volatile int hellosBack;
 
         FakeNode(int port, byte[] reply) throws IOException {
             this(port, reply, null);
@@ -376,6 +406,24 @@ class LineTransportWiringTest {
 
         int pings() {
             return pings;
+        }
+
+        /** Сколько приветствий пришло к нам обратно. */
+        int hellosBack() {
+            return hellosBack;
+        }
+
+        /** Поздороваться так, как это делает настоящая нода. */
+        void hello() throws IOException {
+            socket
+                    .getOutputStream()
+                    .write(
+                            FrameCodec.encode(
+                                    new Frame(
+                                            Frame.CHAN_CONTROL,
+                                            Frame.FLAG_HELLO,
+                                            new byte[0])));
+            socket.getOutputStream().flush();
         }
 
         /**
@@ -409,6 +457,12 @@ class LineTransportWiringTest {
                 while ((n = in.read(buffer)) > 0) {
                     got += n;
                     for (Frame frame : decoder.feed(buffer, 0, n)) {
+                        if (frame.getChannel() == Frame.CHAN_CONTROL) {
+                            if (frame.hasFlag(Frame.FLAG_HELLO)) {
+                                hellosBack++;
+                            }
+                            continue;
+                        }
                         request.write(frame.getPayload(), 0,
                                 frame.getPayload().length);
                         // Отвечаем на последний кадр сообщения: пока идёт

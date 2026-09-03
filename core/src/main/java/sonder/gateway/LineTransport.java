@@ -3,6 +3,7 @@ package sonder.gateway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sonder.gateway.line.Frame;
+import sonder.gateway.line.FrameCodec;
 import sonder.gateway.line.LineMux;
 import sonder.gateway.line.LineServer;
 
@@ -103,15 +104,42 @@ public final class LineTransport implements AutoCloseable {
         mux.onFrame(frame);
     }
 
+    /**
+     * Управляющий канал.
+     *
+     * <p><b>На приветствие ОТВЕЧАЕМ, и это не вежливость.</b> Нода не
+     * умеет переподключаться: нульмодем эмулятора идёт на порт один раз
+     * при старте. Значит, обрыв она обязана заметить сама — а заметить
+     * его можно только по отсутствию ответа: молчание на исправной линии
+     * и молчание на мёртвой выглядят с той стороны одинаково, потому что
+     * своей волей гейтвей не шлёт ничего.
+     *
+     * <p>Ответ и есть тот признак, который их различает. Без него
+     * перезапуск оболочки оставлял ноду живой и бесполезной: эмулятор
+     * работает, цикл крутится, команд больше не будет никогда, а система
+     * выглядит поднятой и отвечает «ядро недоступно» на всё подряд.
+     */
     private void onControl(Frame frame) {
         if (frame.hasFlag(Frame.FLAG_HELLO)) {
             long n = hellos.incrementAndGet();
             if (n == 1) {
                 log.info("нода поздоровалась");
             }
+            answerHello();
             return;
         }
         log.debug("управляющий кадр без приветствия: {}", frame);
+    }
+
+    private void answerHello() {
+        try {
+            line.write(FrameCodec.encode(
+                    new Frame(Frame.CHAN_CONTROL, Frame.FLAG_HELLO, new byte[0])));
+        } catch (RuntimeException e) {
+            // Линия отказала прямо сейчас — отвечать некому, и это не
+            // повод ронять чтение кадров: обрыв заметит onBreak.
+            log.debug("ответ на приветствие не ушёл: {}", e.toString());
+        }
     }
 
     private void onBreak() {
