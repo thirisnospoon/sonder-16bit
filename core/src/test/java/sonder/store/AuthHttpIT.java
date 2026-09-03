@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import sonder.Application;
+import sonder.shell.auth.LoginAttempts;
 import sonder.shell.auth.Passwords;
 
 import javax.sql.DataSource;
@@ -275,6 +276,99 @@ class AuthHttpIT {
      * потоковую отправку — запрос буферизуется и повтор становится
      * возможен.
      */
+    /**
+     * Подбор пароля упирается в предел.
+     *
+     * <p>ДО ЭТОЙ ПРОВЕРКИ ОН НЕ УПИРАЛСЯ НИ ВО ЧТО. Контракт объявляет
+     * {@code LOGIN_RATE_EXCEEDED} с пометкой {@code decided_by: shell},
+     * ARCHITECTURE.md §14 обещает ограничение частоты входа — и ни одна
+     * строка кода его не выдавала. Нашлось замером: двенадцать неверных
+     * паролей подряд проходили без единого отказа.
+     */
+    @Test
+    @DisplayName("подбор пароля упирается в предел, и код тот, что в контракте")
+    void подборУпираетсяВПредел() {
+        for (int i = 0; i < LoginAttempts.LIMIT; i++) {
+            ResponseEntity<Map> ответ = login("andrey", "не тот пароль " + i);
+            assertEquals(HttpStatus.UNAUTHORIZED, ответ.getStatusCode(),
+                    "попытка " + (i + 1) + " обязана быть отказом по паролю");
+        }
+
+        ResponseEntity<Map> лишняя = login("andrey", "не тот пароль ещё");
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, лишняя.getStatusCode(),
+                "после " + LoginAttempts.LIMIT + " неудач вход обязан "
+                        + "отвечать пределом, а не продолжать проверять пароли");
+        assertNotNull(лишняя.getBody());
+        assertEquals("LOGIN_RATE_EXCEEDED", лишняя.getBody().get("code"));
+
+        // И ПРАВИЛЬНЫЙ ПАРОЛЬ ТОЖЕ НЕ ПРОХОДИТ. Иначе предел обходится
+        // тем, ради чего он и стоит: подобравший с одиннадцатой попытки
+        // вошёл бы как ни в чём не бывало.
+        ResponseEntity<Map> сВерным = login("andrey", "тайна");
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, сВерным.getStatusCode(),
+                "предел обязан закрывать вход целиком, а не только неверные пароли");
+    }
+
+    /**
+     * Счёт по нику НЕЧУВСТВИТЕЛЕН К РЕГИСТРУ.
+     *
+     * <p>Вход нечувствителен, и счёт обязан быть таким же: иначе предел
+     * обходится сменой регистра, а это даёт подбирающему столько
+     * попыток, сколько букв в нике.
+     */
+    @Test
+    @DisplayName("смена регистра ника не обнуляет счёт попыток")
+    void сменаРегистраНеОбнуляетСчёт() {
+        for (int i = 0; i < LoginAttempts.LIMIT; i++) {
+            // Регистр меняется на каждой попытке.
+            String ник = (i % 2 == 0) ? "andrey" : "ANDREY";
+            assertEquals(HttpStatus.UNAUTHORIZED,
+                    login(ник, "не тот " + i).getStatusCode());
+        }
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS,
+                login("AnDrEy", "не тот ещё").getStatusCode(),
+                "счёт разошёлся по регистрам — предел обходится сменой букв");
+    }
+
+    /**
+     * Неизвестный ник считается наравне с известным.
+     *
+     * <p>Иначе получается оракул перебора: несуществующий ник отвечал бы
+     * вечно, существующий упирался бы в предел, и разница выдавала бы,
+     * кто в системе есть.
+     */
+    @Test
+    @DisplayName("предел работает и для ника, которого нет")
+    void неизвестныйНикТожеСчитается() {
+        String нетТакого = "никогонетвообще";
+        for (int i = 0; i < LoginAttempts.LIMIT; i++) {
+            assertEquals(HttpStatus.UNAUTHORIZED,
+                    login(нетТакого, "пароль " + i).getStatusCode());
+        }
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS,
+                login(нетТакого, "пароль ещё").getStatusCode(),
+                "несуществующий ник отвечает вечно — это оракул перебора");
+    }
+
+    /** Успешный вход стирает счёт: предел не наказывает за опечатку. */
+    @Test
+    @DisplayName("успешный вход обнуляет счёт неудач")
+    void успешныйВходОбнуляетСчёт() {
+        for (int i = 0; i < LoginAttempts.LIMIT - 1; i++) {
+            assertEquals(HttpStatus.UNAUTHORIZED,
+                    login("andrey", "не тот " + i).getStatusCode());
+        }
+        assertEquals(HttpStatus.NO_CONTENT, login("andrey", "тайна").getStatusCode());
+
+        // После успеха счёт с нуля: девять неудач снова допустимы.
+        for (int i = 0; i < LoginAttempts.LIMIT - 1; i++) {
+            assertEquals(HttpStatus.UNAUTHORIZED,
+                    login("andrey", "снова не тот " + i).getStatusCode(),
+                    "счёт не обнулился после успешного входа");
+        }
+    }
+
     private void disableStreaming() {
         org.springframework.http.client.SimpleClientHttpRequestFactory factory =
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();

@@ -92,7 +92,8 @@ abstract class FirebirdSupport {
      * миграцией и не добавленная сюда, красит сборку.
      */
     static final List<String> TABLES = Collections.unmodifiableList(Arrays.asList(
-            "feed_entries", "feed_subscriptions", "outbox", "sessions", "follows", "comments", "posts", "users"));
+            "feed_entries", "feed_subscriptions", "outbox", "sessions", "login_attempts",
+            "follows", "comments", "posts", "users"));
 
     /** Опустошить базу в уже открытом соединении. Порядок обходит ключи. */
     static void wipe(Connection c) throws SQLException {

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
+import sonder.shell.auth.LoginAttempts;
 import sonder.shell.auth.Passwords;
 import sonder.shell.auth.SessionStore;
 
@@ -126,6 +127,15 @@ public class AuthController {
         String password = request == null ? null : request.getPassword();
 
         try (Connection c = dataSource.getConnection()) {
+            Instant now = Instant.now();
+
+            // ПРЕДЕЛ СПРАШИВАЕТСЯ ДО ПРОВЕРКИ ПАРОЛЯ. Спроси мы после —
+            // предел не мешал бы подбору, а лишь сообщал о нём, когда
+            // очередная попытка уже состоялась.
+            if (LoginAttempts.tooMany(c, nick, now)) {
+                return RestErrors.of(ErrorCode.LOGIN_RATE_EXCEEDED, traceId);
+            }
+
             String userId = null;
             String hash = DUMMY_HASH;
 
@@ -147,10 +157,18 @@ public class AuthController {
             // время ответа выдало бы существование ника.
             boolean ok = Passwords.matches(password, hash) && userId != null;
             if (!ok) {
+                // Записывается попытка по ЛЮБОМУ нику, существующему или
+                // нет: считать только существующие значило бы завести
+                // оракул перебора — несуществующий ник отвечал бы вечно,
+                // существующий упирался бы в предел.
+                LoginAttempts.record(c, nick, now);
                 return RestErrors.of(ErrorCode.CREDENTIALS_INVALID, traceId);
             }
 
-            String token = SessionStore.open(c, userId, Instant.now());
+            // Предел защищает от подбора, а не наказывает за опечатку:
+            // вспомнивший пароль не должен ждать окончания окна.
+            LoginAttempts.clear(c, nick);
+            String token = SessionStore.open(c, userId, now);
             SessionCookie.issue(response, token, cookieSecure, cookieMaxAge);
             return ResponseEntity.noContent().build();
         }
