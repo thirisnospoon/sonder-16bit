@@ -336,6 +336,19 @@ cmd_soak_total() {
   '
 }
 
+# Замер рассасывания отставания: гейт Ф7 требует, чтобы завал в десять
+# тысяч событий разбирался. Это не тест, а число, и потому отдельная цель
+# — по той же причине, по которой отдельно живёт фаззинг.
+#
+#   ./sonder drain-bench [сколько событий]
+cmd_drain_bench() {
+  need_docker
+  local events="${1:-10000}"
+  step "рассасывание отставания: $events событий"
+  bash ops/ci/run-it.sh -Dgroups=bench -Dtest=DrainBenchIT \
+       -Dsonder.bench.events="$events" -DfailIfNoTests=false
+}
+
 cmd_clean() {
   rm -rf spikes/*/out
   echo "сборочные артефакты удалены"
@@ -354,6 +367,7 @@ Sonder — цели
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
   soak-total           сколько накоплено фаззинга из требуемых суток
+  drain-bench [N]      замер: за сколько разберётся завал из N событий
   check-generated      собрать и прогнать сгенерированный Pascal
   test                 тесты TurboCore на обоих таргетах
   test-native          только нативный таргет, доли секунды
@@ -385,6 +399,7 @@ case "${1:-help}" in
   spikes)             cmd_spikes ;;
   soak)               shift; need_docker; cmd_soak "$@" ;;
   soak-total)         cmd_soak_total ;;
+  drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
   clean)              cmd_clean ;;

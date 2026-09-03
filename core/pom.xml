@@ -224,6 +224,14 @@
             <configuration>
               <useFile>false</useFile>
               <trimStackTrace>false</trimStackTrace>
+              <!--
+                Замеры из обычного прогона исключены. Тест отвечает «да»
+                или «нет» и обязан укладываться в секунды; замер отвечает
+                числом и занимает минуты. Держать их вместе значит либо
+                замедлить прогон, либо занизить замер до бессмысленного.
+                Запуск: ./sonder drain-bench
+              -->
+              <excludedGroups>bench</excludedGroups>
             </configuration>
           </plugin>
         </plugins>
