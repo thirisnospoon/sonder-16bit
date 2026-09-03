@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
+import sonder.gateway.soap.LineDecider;
+
 import java.io.IOException;
 import java.time.Duration;
 
@@ -46,6 +48,43 @@ public class LineTransportConfig {
         // 502 на каждую команду и выглядело бы работающим.
         transport.start();
         return transport;
+    }
+
+    /**
+     * Опрос ноды по часам.
+     *
+     * <p>Свой {@link LineDecider}, а не бин {@code Decider} оболочки:
+     * тот обёрнут переводом отказов в решения, и опрос обязан видеть
+     * отказ отказом. К тому же зависимость от бина оболочки развернула
+     * бы стрелку — гейтвей начал бы зависеть от того, кто зависит от
+     * него.
+     *
+     * @param staleMs через сколько снимок считать протухшим. Втрое
+     *                больше периода опроса по умолчанию: один
+     *                пропущенный опрос — это ещё не беда, три подряд уже
+     *                беда
+     */
+    @Bean
+    @Conditional(PortNamed.class)
+    public NodeProbe nodeProbe(
+            LineTransport transport,
+            @Value("${sonder.decider.line.stale-ms:45000}") long staleMs) {
+        return new NodeProbe(
+                new LineDecider(transport.getMux(), transport.getTimeout()),
+                Duration.ofMillis(staleMs));
+    }
+
+    @Bean
+    @Conditional(PortNamed.class)
+    public NodeProbeSchedule nodeProbeSchedule(NodeProbe probe) {
+        return new NodeProbeSchedule(probe);
+    }
+
+    /** Имя бина становится именем раздела в {@code /actuator/health}. */
+    @Bean
+    @Conditional(PortNamed.class)
+    public NodeHealth node(NodeProbe probe) {
+        return new NodeHealth(probe);
     }
 
     /**

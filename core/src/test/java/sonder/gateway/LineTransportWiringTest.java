@@ -2,7 +2,10 @@ package sonder.gateway;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.actuate.health.Status;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import sonder.contract.ErrorCode;
 import sonder.contract.decider.ActorContext;
 import sonder.contract.decider.CommandMeta;
@@ -22,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +74,29 @@ class LineTransportWiringTest {
         byte[] one = new byte[len];
         System.arraycopy(all, 2, one, 0, len);
         return one;
+    }
+
+    /** Пятый эталон: ответ на пинг со всеми метриками. */
+    private static byte[] goldenPong() throws IOException {
+        byte[] all = Files.readAllBytes(REPLIES.toPath());
+        int i = 0;
+        byte[] one = new byte[0];
+        for (int n = 0; n < 5 && i + 2 <= all.length; n++) {
+            int len = (all[i] & 0xFF) | ((all[i + 1] & 0xFF) << 8);
+            i += 2;
+            one = new byte[len];
+            System.arraycopy(all, i, one, 0, len);
+            i += len;
+        }
+        assertTrue(new String(one, StandardCharsets.UTF_8).contains("PingResponse"),
+                "пятый эталон оказался не ответом на пинг");
+        return one;
+    }
+
+    /** Расписание включается отдельно: оно свойство приложения, не линии. */
+    @Configuration
+    @EnableScheduling
+    static class Clockwork {
     }
 
     private static ApplicationContextRunner runner() {
@@ -234,6 +261,59 @@ class LineTransportWiringTest {
                 });
     }
 
+    @Test
+    @DisplayName("без линии здоровья ноды нет вовсе, а не «плохо»")
+    void withoutLineThereIsNoHealth() {
+        // Красная лампа, горящая по устройству на стенде без эмулятора,
+        // погасла бы в глазах людей за неделю.
+        runner().run(context -> {
+            assertNull(context.getStartupFailure());
+            assertEquals(0, context.getBeanNamesForType(NodeHealth.class).length,
+                    "показатель здоровья ноды есть, а ноды нет");
+            assertEquals(0, context.getBeanNamesForType(NodeProbe.class).length,
+                    "опрос ноды заведён, а спрашивать некого");
+        });
+    }
+
+    @Test
+    @DisplayName("часы сами доводят опрос до ноды, и здоровье становится UP")
+    void probeReachesTheNodeOnItsOwn() {
+        // Опрос, который никто не запускает, — это те же метрики, до
+        // которых не доходит исполнение. Здесь его не зовёт тест: ждём,
+        // пока сработают часы приложения.
+        new ApplicationContextRunner()
+                .withUserConfiguration(Clockwork.class,
+                        LineTransportConfig.class, DeciderConfig.class)
+                .withPropertyValues(
+                        "sonder.decider.line.port=0",
+                        "sonder.decider.line.timeout-ms=2000",
+                        "sonder.decider.line.probe-initial-ms=50",
+                        "sonder.decider.line.probe-ms=100",
+                        "sonder.decider.line.stale-ms=30000")
+                .run(context -> {
+                    assertNull(context.getStartupFailure(),
+                            String.valueOf(context.getStartupFailure()));
+                    LineTransport line = context.getBean(LineTransport.class);
+                    NodeHealth health = context.getBean(NodeHealth.class);
+
+                    try (FakeNode node = new FakeNode(line.getPort(),
+                            goldenAccepted(), goldenPong())) {
+                        await(line::isConnected, "нода не подключилась");
+                        await(() -> health.health().getStatus() == Status.UP,
+                                "здоровье не поднялось: опрос до ноды не дошёл");
+
+                        // Числа те, что нода прислала эталонным конвертом.
+                        assertEquals(1024,
+                                health.health().getDetails().get("arenaHighMark"));
+                        assertEquals(2048,
+                                health.health().getDetails().get("arenaCapacity"));
+                        assertEquals(17,
+                                health.health().getDetails().get("commandsServed"));
+                        assertTrue(node.pings() > 0, "нода не получила ни пинга");
+                    }
+                });
+    }
+
     /** Ждать условия не дольше пяти секунд: линия локальная и быстрая. */
     private static void await(java.util.function.BooleanSupplier condition,
                               String message) throws InterruptedException {
@@ -272,11 +352,18 @@ class LineTransportWiringTest {
         private final Socket socket;
         private final Thread thread;
         private final byte[] reply;
+        private final byte[] pong;
         private final CountDownLatch stopped = new CountDownLatch(1);
         private volatile long got;
+        private volatile int pings;
 
         FakeNode(int port, byte[] reply) throws IOException {
+            this(port, reply, null);
+        }
+
+        FakeNode(int port, byte[] reply, byte[] pong) throws IOException {
             this.reply = reply;
+            this.pong = pong;
             this.socket = new Socket("127.0.0.1", port);
             this.thread = new Thread(this::loop, "fake-node");
             this.thread.setDaemon(true);
@@ -287,9 +374,34 @@ class LineTransportWiringTest {
             return got;
         }
 
+        int pings() {
+            return pings;
+        }
+
+        /**
+         * Ответ на пинг несёт СПРОШЕННЫЙ нонс.
+         *
+         * <p>Эталон записан с одним нонсом навсегда, а опрос
+         * спрашивает случайным и сверяет — иначе перепутанные между
+         * каналами ответы прошли бы за свои. Настоящая нода отвечает тем
+         * же нонсом; здесь он подставляется в эталон, и это ровно то же
+         * самое действие.
+         */
+        private byte[] pongFor(String request) {
+            int a = request.indexOf("<nonce>");
+            int b = request.indexOf("</nonce>", a);
+            String nonce = request.substring(a + "<nonce>".length(), b);
+            String text = new String(pong, StandardCharsets.UTF_8)
+                    .replaceFirst("<nonce>[0-9-]+</nonce>",
+                            "<nonce>" + nonce + "</nonce>");
+            return text.getBytes(StandardCharsets.UTF_8);
+        }
+
         private void loop() {
             FrameDecoder decoder = new FrameDecoder();
             byte[] buffer = new byte[4096];
+            java.io.ByteArrayOutputStream request =
+                    new java.io.ByteArrayOutputStream();
             try {
                 InputStream in = socket.getInputStream();
                 OutputStream out = socket.getOutputStream();
@@ -297,15 +409,26 @@ class LineTransportWiringTest {
                 while ((n = in.read(buffer)) > 0) {
                     got += n;
                     for (Frame frame : decoder.feed(buffer, 0, n)) {
+                        request.write(frame.getPayload(), 0,
+                                frame.getPayload().length);
                         // Отвечаем на последний кадр сообщения: пока идёт
                         // FLAG_MORE, команда ещё не приехала целиком.
                         if (frame.hasFlag(Frame.FLAG_MORE)) {
                             continue;
                         }
-                        if (reply == null) {
+                        String text = new String(request.toByteArray(),
+                                StandardCharsets.UTF_8);
+                        request.reset();
+
+                        byte[] answer = reply;
+                        if (text.contains("PingRequest")) {
+                            pings++;
+                            answer = pong == null ? null : pongFor(text);
+                        }
+                        if (answer == null) {
                             continue;
                         }
-                        for (Frame back : replyFrames(frame.getChannel())) {
+                        for (Frame back : replyFrames(frame.getChannel(), answer)) {
                             out.write(FrameCodec.encode(back));
                         }
                         out.flush();
@@ -318,17 +441,17 @@ class LineTransportWiringTest {
             }
         }
 
-        private List<Frame> replyFrames(int channel) {
+        private List<Frame> replyFrames(int channel, byte[] payload) {
             List<Frame> out = new ArrayList<>();
             int offset = 0;
             do {
-                int take = Math.min(Frame.MAX_PAYLOAD, reply.length - offset);
+                int take = Math.min(Frame.MAX_PAYLOAD, payload.length - offset);
                 byte[] chunk = new byte[take];
-                System.arraycopy(reply, offset, chunk, 0, take);
+                System.arraycopy(payload, offset, chunk, 0, take);
                 offset += take;
-                boolean last = offset >= reply.length;
+                boolean last = offset >= payload.length;
                 out.add(new Frame(channel, last ? 0 : Frame.FLAG_MORE, chunk));
-            } while (offset < reply.length);
+            } while (offset < payload.length);
             return out;
         }
 
