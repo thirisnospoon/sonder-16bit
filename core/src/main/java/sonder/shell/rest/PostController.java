@@ -72,7 +72,7 @@ public class PostController {
         // Идентификатор трассировки заводится ДО первой возможной ошибки:
         // контракт требует его в теле любого отказа, в том числе отказа
         // по сессии.
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -101,7 +101,7 @@ public class PostController {
     public ResponseEntity<Map<String, Object>> deletePost(
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String postId) throws Exception {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -127,7 +127,7 @@ public class PostController {
     public ResponseEntity<Map<String, Object>> getPost(
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String postId) throws SQLException {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -174,14 +174,5 @@ public class PostController {
         try (Connection c = dataSource.getConnection()) {
             return SessionStore.userOf(c, token, Instant.now());
         }
-    }
-
-    /**
-     * Идентификатор трассировки. Один на команду: он же уходит в
-     * {@code meta.traceId} к ядру и в строку outbox, и по нему потом
-     * сходятся лог оболочки, лог ядра и событие.
-     */
-    private static String newTraceId() {
-        return "t-" + UUID.randomUUID().toString().replace("-", "");
     }
 }

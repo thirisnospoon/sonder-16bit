@@ -121,7 +121,7 @@ public class AuthController {
             @RequestBody(required = false) LoginRequest request,
             HttpServletResponse response)
             throws SQLException {
-        String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        String traceId = Trace.current();
         String nick = request == null ? null : request.getNick();
         String password = request == null ? null : request.getPassword();
 
@@ -177,7 +177,7 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> me(
             @CookieValue(value = SessionCookie.NAME, required = false) String token)
             throws SQLException {
-        String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        String traceId = Trace.current();
         try (Connection c = dataSource.getConnection()) {
             String userId = SessionStore.userOf(c, token, Instant.now());
             if (userId == null) {

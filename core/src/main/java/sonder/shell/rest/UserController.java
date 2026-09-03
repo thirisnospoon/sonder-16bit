@@ -100,7 +100,7 @@ public class UserController {
     @PostMapping("/users")
     public ResponseEntity<Map<String, Object>> register(
             @RequestBody(required = false) RegisterRequest request) throws Exception {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         if (request == null) {
             // Код ОБОЛОЧЕЧНЫЙ: команду не удалось собрать, а не она
             // неверна по смыслу. Доменным кодом здесь оболочка сказала бы
@@ -142,7 +142,7 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> getUser(
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws SQLException {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         if (actor(token) == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -171,7 +171,7 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> follow(
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws Exception {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -200,7 +200,7 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> unfollow(
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws Exception {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -230,7 +230,7 @@ public class UserController {
             @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick,
             @RequestBody(required = false) BanRequest request) throws Exception {
-        String traceId = newTraceId();
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
@@ -269,9 +269,5 @@ public class UserController {
         try (Connection c = dataSource.getConnection()) {
             return SessionStore.userOf(c, token, Instant.now());
         }
-    }
-
-    private static String newTraceId() {
-        return "t-" + UUID.randomUUID().toString().replace("-", "");
     }
 }

@@ -59,7 +59,7 @@ public class EventsController {
             // Отказ отдаётся обычным телом ошибки, а не потоком: клиент,
             // получивший поток, стал бы ждать в нём событий, которых
             // никогда не будет.
-            String traceId = "t-" + UUID.randomUUID().toString().replace("-", "");
+            String traceId = Trace.current();
             ResponseEntity<?> error =
                     RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
             return error;

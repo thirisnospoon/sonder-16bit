@@ -58,7 +58,7 @@ public class FeedController {
             @RequestParam(value = "limit", required = false) Integer limit)
             throws SQLException {
 
-        String traceId = "t-" + UUID.randomUUID().toString().replace("-", "");
+        String traceId = Trace.current();
         String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
