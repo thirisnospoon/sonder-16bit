@@ -28,13 +28,9 @@ import sonder.contract.decider.TargetUserContext;
 import sonder.contract.decider.UnfollowUserCommand;
 import sonder.contract.decider.UnfollowUserRequest;
 import sonder.contract.decider.UserStatus;
+import sonder.gateway.soap.Envelopes;
 
-import javax.xml.bind.JAXBContext;
-import javax.xml.bind.JAXBElement;
-import javax.xml.bind.Marshaller;
-import javax.xml.namespace.QName;
 import java.io.File;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -287,31 +283,22 @@ class EnvelopeGoldenTest {
     }
 
     /**
-     * Конверт собирается вручную вокруг тела, как это делает гейтвей.
+     * Конверт собирает ТОТ ЖЕ код, что и гейтвей в бою.
+     *
+     * <p>Раньше сборка жила здесь, в тесте, и эталоны доказывали ровно
+     * одно: что ядро понимает байты, собранные тестом. Про байты, которые
+     * в линию положит гейтвей, они не говорили ничего — это разные куски
+     * кода, пока они не один кусок. Теперь один.
      *
      * <p>Гейтвей терминирует SOAP и переупаковывает вызов в кадры линии
      * (ADR-0007), поэтому конверт для ноды собирает именно он, а не
      * транспорт CXF. Тело при этом маршалит тот же JAXB, что и в бою, — а
      * именно тело и содержит всё, на чём стороны могут разойтись.
      */
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static String marshalEnvelope(Sample s) throws Exception {
-        JAXBContext ctx = JAXBContext.newInstance(s.type);
-        Marshaller m = ctx.createMarshaller();
-        m.setProperty(Marshaller.JAXB_FRAGMENT, Boolean.TRUE);
-        m.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, Boolean.FALSE);
-
-        StringWriter body = new StringWriter();
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        JAXBElement<?> el = new JAXBElement(
-                new QName(DECIDER_NS, s.element), s.type, s.value);
-        m.marshal(el, body);
-
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<soap:Envelope xmlns:soap=\"" + SOAP_NS + "\">"
-                + "<soap:Body>"
-                + body
-                + "</soap:Body>"
-                + "</soap:Envelope>";
+        byte[] bytes = Envelopes.wrap((Class) s.type, s.element, s.value);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /**
