@@ -33,6 +33,12 @@ interface
 uses
   TcStr, TcSoap, DcdTypes;
 
+const
+  { Пространство имён контракта. Отсюда, а не строкой в каждом
+    месте: корень тела ответа обязан его объявлять, иначе
+    связыватель на другой стороне не найдёт ни одного поля. }
+  DeciderNs = 'urn:sonder:decider:v1';
+
 type
   { Что стало с полем, пришедшим в конверте. }
   TFillOutcome = (
@@ -842,8 +848,9 @@ procedure WriteDecision(var W: TSoapWriter;
                         const D: TDecision);
 var
   Node: PDomainEventNode;
+  Leaf: PEventFieldNode;
 begin
-  SoapOpen(W, ResponseName);
+  SoapOpenNs(W, ResponseName, 'urn:sonder:decider:v1');
   SoapElementBool(W, 'accepted', D.accepted);
   SoapElement(W, 'errorCode', D.errorCode);
   SoapElement(W, 'errorDetail', D.errorDetail);
@@ -853,6 +860,15 @@ begin
     SoapOpen(W, 'event');
     SoapElement(W, 'type', Node^.Value.type_);
     SoapElement(W, 'aggregateId', Node^.Value.aggregateId);
+    Leaf := Node^.Value.field;
+    while Leaf <> nil do
+    begin
+      SoapOpen(W, 'field');
+      SoapElement(W, 'key', Leaf^.Value.key);
+      SoapElement(W, 'value', Leaf^.Value.value);
+      SoapClose(W, 'field');
+      Leaf := Leaf^.Next;
+    end;
     SoapClose(W, 'event');
     Node := Node^.Next;
   end;

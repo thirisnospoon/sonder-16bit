@@ -145,6 +145,16 @@ procedure SoapBeginEnvelope(var W: TSoapWriter);
 procedure SoapEndEnvelope(var W: TSoapWriter);
 
 procedure SoapOpen(var W: TSoapWriter; const Name: string);
+
+{ Открыть элемент, объявив на нём пространство имён по умолчанию.
+
+  Нужно ровно одному элементу — корню тела ответа, — и без него ответ
+  разбирается на той стороне в пустоту: связыватель ищет поля в
+  объявленном пространстве, а находит их без пространства вовсе.
+  Стоило это целого сквозного прогона: решение приезжало «не принято»
+  без кода отказа. }
+procedure SoapOpenNs(var W: TSoapWriter; const Name, Ns: string);
+
 procedure SoapClose(var W: TSoapWriter; const Name: string);
 
 { Текст с экранированием. Неэкранированный амперсанд в теле поста сделал
@@ -584,6 +594,16 @@ begin
   PutByte(W, Ord('<'));
   PutPas(W, Name);
   PutByte(W, Ord('>'));
+  Inc(W.Depth);
+end;
+
+procedure SoapOpenNs(var W: TSoapWriter; const Name, Ns: string);
+begin
+  PutByte(W, Ord('<'));
+  PutPas(W, Name);
+  PutPas(W, ' xmlns="');
+  PutPas(W, Ns);
+  PutPas(W, '">');
   Inc(W.Depth);
 end;
 

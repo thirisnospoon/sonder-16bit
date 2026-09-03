@@ -41,6 +41,11 @@ JSON_OUT = ROOT / "contracts" / "generated" / "operations.json"
 XS = "http://www.w3.org/2001/XMLSchema"
 WSDL = "http://schemas.xmlsoap.org/wsdl/"
 
+# Пространство имён контракта. Читается из самого WSDL при разборе:
+# вписанное сюда строкой оно стало бы вторым экземпляром того, что уже
+# объявлено, и разошлось бы при первой же смене версии.
+TARGET_NS = ""
+
 # Ключевые слова Pascal, которые нельзя использовать как имена полей.
 RESERVED = {
     "and", "array", "begin", "case", "const", "div", "do", "downto", "else",
@@ -134,8 +139,14 @@ def collect_fields(container: ET.Element, model: Model) -> list[dict]:
 
 
 def build(model: Model) -> None:
+    global TARGET_NS
     tree = ET.parse(WSDL_PATH)
     root = tree.getroot()
+    TARGET_NS = root.get("targetNamespace") or ""
+    if not TARGET_NS:
+        raise SystemExit("в WSDL нет targetNamespace: ответ ноды остался бы "
+                         "без пространства имён, и разобрать его было бы "
+                         "нечем")
     schema = root.find(f"{{{WSDL}}}types/{{{XS}}}schema")
     if schema is None:
         raise SystemExit("в WSDL нет встроенной схемы")
@@ -358,14 +369,28 @@ def decision_writer(model: Model) -> list[str]:
             return [f"{indent}SoapElementInt(W, '{name}', {acc});"]
         return []
 
+    # Вложенный повторяемый список внутри события — поля полезной
+    # нагрузки. Без них событие уезжает пустым, и вся цепочка после
+    # ядра остаётся без данных: проекция ленты не найдёт автора поста.
+    # Раньше генератор их не писал вовсе, и заметил это только сквозной
+    # прогон — ни один тест не пропускал вывод настоящего писателя
+    # через настоящий разборщик.
+    nested = [g for g in ev if g["repeated"]]
+
     o: list[str] = []
     o.append("procedure WriteDecision(var W: TSoapWriter;")
     o.append("                        const ResponseName: string;")
     o.append("                        const D: TDecision);")
     o.append("var")
     o.append("  Node: PDomainEventNode;")
+    if nested:
+        o.append("  Leaf: PEventFieldNode;")
     o.append("begin")
-    o.append("  SoapOpen(W, ResponseName);")
+    # Корень тела ответа обязан нести пространство имён контракта.
+    # Без него связыватель на другой стороне не находит ни одного поля и
+    # отдаёт пустое решение — «не принято» без кода отказа. Найдено
+    # сквозным прогоном, не чтением.
+    o.append(f"  SoapOpenNs(W, ResponseName, '{TARGET_NS}');")
     for f in dec:
         if not f["repeated"]:
             o.extend(one("  ", f["xsd_name"], f"D.{f['name']}", f["type"]))
@@ -381,6 +406,25 @@ def decision_writer(model: Model) -> list[str]:
                 continue
             o.extend(one("    ", g["xsd_name"],
                          f"Node^.Value.{g['name']}", g["type"]))
+        for g in nested:
+            # Тип уже приходит именем записи: P...Node — форма только
+            # для объявления списка, а не для поиска в модели.
+            leaf = by_name.get(g["type"], [])
+            if not leaf:
+                raise SystemExit("не найдена запись " + g["type"]
+                                 + ": событие уехало бы без полезной нагрузки")
+            o.append(f"    Leaf := Node^.Value.{g['name']};")
+            o.append("    while Leaf <> nil do")
+            o.append("    begin")
+            o.append(f"      SoapOpen(W, '{g['xsd_name']}');")
+            for h in leaf:
+                if h["repeated"]:
+                    continue
+                o.extend(one("      ", h["xsd_name"],
+                             f"Leaf^.Value.{h['name']}", h["type"]))
+            o.append(f"      SoapClose(W, '{g['xsd_name']}');")
+            o.append("      Leaf := Leaf^.Next;")
+            o.append("    end;")
         o.append(f"    SoapClose(W, '{f['xsd_name']}');")
         o.append("    Node := Node^.Next;")
         o.append("  end;")
@@ -396,7 +440,13 @@ def emit_server(model: Model) -> str:
 
     o: list[str] = [
         SRV_HEADER, "", "unit DcdSrv;", "", "{$MODE TP}", "{$R-}", "",
-        "interface", "", "uses", "  TcStr, TcSoap, DcdTypes;", "", "type",
+        "interface", "", "uses", "  TcStr, TcSoap, DcdTypes;", "",
+        "const",
+        "  { Пространство имён контракта. Отсюда, а не строкой в каждом",
+        "    месте: корень тела ответа обязан его объявлять, иначе",
+        "    связыватель на другой стороне не найдёт ни одного поля. }",
+        f"  DeciderNs = '{TARGET_NS}';", "",
+        "type",
         "  { Что стало с полем, пришедшим в конверте. }",
         "  TFillOutcome = (",
         "    foOk,        { поле известно и разобрано }",

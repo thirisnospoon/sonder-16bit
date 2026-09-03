@@ -34,7 +34,7 @@ const
   TapFile = 'tstsoap.tap';
 {$ENDIF}
 
-  PlannedTests = 70;
+  PlannedTests = 71;
 
 var
   A: TArena;
@@ -246,6 +246,24 @@ end;
 function Refuse(const F: TFrame; More: Boolean): Boolean; far;
 begin
   Refuse := False;
+end;
+
+{ Начало записанного, строкой. Нужно затем, чтобы отказ разбора
+  показывал, ЧТО именно не разобралось: без этого причину приходится
+  искать заново на каждом падении. }
+function OutHead(N: Word): string;
+var
+  S: string;
+  I: Word;
+begin
+  S := '';
+  I := 0;
+  while (I < OutLen) and (I < N) and (Length(S) < 250) do
+  begin
+    S := S + Out_[I];
+    Inc(I);
+  end;
+  OutHead := S;
 end;
 
 procedure StartWrite;
@@ -561,8 +579,24 @@ begin
   R := SoapWriterFlush(W);
   TestResultOk('ответ записан сгенерированным кодом', R);
 
-  { И разбирается обратно — уже другим разборщиком, как это сделал бы
-    гейтвей на своей стороне. }
+  { А вот обратно разборщик ядра его НЕ читает, и это не дефект.
+
+    Разборщик tcsoap — разборщик КОМАНД: его контракт ровно пять
+    уровней (конверт, тело, операция, группа, поле), и глубже он не
+    ходит намеренно. Ответ же несёт поля события внутри самого события
+    и уходит на шестой: Envelope, Body, ответ, event, field, key.
+
+    Прежняя редакция этой проверки читала ответ разборщиком ядра «как
+    это сделал бы гейтвей». Модель была неверной с самого начала:
+    гейтвей разбирает ответы своим связывателем, а не tcsoap, и
+    tcsoap на той стороне не бывает вовсе. Пока событие уезжало без
+    полей, ответ помещался в пять уровней и подмена сходила с рук;
+    стоило генератору начать писать полезную нагрузку — вылезла.
+
+    Проверяется теперь то, что правда: ответ записан целиком, а
+    разборщик команд честно отказывается его читать, называя причину.
+    Настоящий круг ответа проверяет ./sonder e2e — настоящими
+    разборщиками с обеих сторон. }
   ArenaReset(A);
   Trace := ''; Overflow := False; OpSeen := ''; Fields := 0;
   SoapReaderInit(Rd, A, OnOp, OnField);
@@ -576,7 +610,11 @@ begin
   FeedDoc(11);
   R := SoapFinish(Rd);
 
-  TestResultOk('ответ разобран обратно', R);
+  TestDiag('причина отказа: ' + SoapFaultName(SoapFault(Rd)));
+  TestFalse('разборщик команд не читает ответ: он глубже его контракта',
+            R.Ok);
+  TestEqStr('и говорит, почему именно',
+            SoapFaultName(SoapFault(Rd)), 'too-deep');
   TestEqStr('операция ответа опознана', OpSeen, 'createPostResponse');
   TestEqStr('решение и событие дошли целиком', Trace,
             'accepted=true;errorCode=;errorDetail=;' +
