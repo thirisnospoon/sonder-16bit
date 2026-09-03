@@ -51,11 +51,23 @@ test('текст обновляется точечно, не трогая сос
   const p = parent.querySelector('p')
   assert.ok(p)
   assert.equal(p.textContent, 'постов: 1 штук')
-  assert.equal(p.childNodes.length, 3, 'меняющийся кусок не в своём узле')
+
+  // Соседи меняющегося куска — отдельные узлы, и они обязаны пережить
+  // обновление. Сравнение по тождеству, а не по тексту: перерисовка
+  // родителя дала бы тот же текст новыми узлами.
+  const before = p.firstChild
+  const after = p.lastChild
+  const nodesBefore = p.childNodes.length
 
   count.value = 42
   assert.equal(p.textContent, 'постов: 42 штук', 'текст не обновился')
-  assert.equal(p.childNodes.length, 3, 'обновление пересобрало содержимое')
+  assert.equal(p.firstChild, before, 'сосед слева пересоздан')
+  assert.equal(p.lastChild, after, 'сосед справа пересоздан')
+  assert.equal(
+    p.childNodes.length,
+    nodesBefore,
+    'обновление добавило или убрало узлы',
+  )
 })
 
 test('постоянное значение не заводит эффекта', () => {

@@ -11,7 +11,15 @@
  * снимает ОДНУ область, а не обходит дерево, вспоминая, что к чему было
  * привязано. Список, который надо помнить, однажды окажется неполным.
  */
-import { effect, onCleanup, root } from './reactive.js'
+import {
+  detachedRoot,
+  effect,
+  onCleanup,
+  root,
+  signal,
+  untrack,
+  type WriteSignal,
+} from './reactive.js'
 
 /** Значение, которое может быть постоянным или пересчитываемым. */
 export type Reactive<T> = T | (() => T)
@@ -25,6 +33,34 @@ export type Child =
   | undefined
   | (() => Child)
   | readonly Child[]
+  | AnyList
+
+/**
+ * Список в разметке.
+ *
+ * Без параметра типа намеренно: в объединении Child он стоял бы рядом с
+ * разнородными списками, а функции внутри {@link ListChild} принимают T
+ * и потому по типам несовместимы между собой. Тип элемента проверяется
+ * там, где список СОБИРАЮТ, — в {@link each}, — и это единственное
+ * место, где он вообще известен.
+ */
+export interface AnyList {
+  readonly kind: 'список'
+}
+
+export interface ListChild<T> extends AnyList {
+  readonly items: () => readonly T[]
+  readonly key: (item: T, index: number) => string | number
+  readonly render: (item: () => T, index: () => number) => Node
+}
+
+function isList(child: unknown): child is AnyList {
+  return (
+    typeof child === 'object' &&
+    child !== null &&
+    (child as AnyList).kind === 'список'
+  )
+}
 
 /**
  * Свойства элемента.
@@ -166,19 +202,225 @@ function appendChild(parent: Node, child: Child): void {
     parent.appendChild(child)
     return
   }
+  if (isList(child)) {
+    appendList(parent, child as ListChild<unknown>)
+    return
+  }
   if (isFunction(child)) {
-    // Меняющееся содержимое живёт в отдельном текстовом узле: замена
-    // textContent у родителя стирала бы соседей.
-    const node = document.createTextNode('')
-    parent.appendChild(node)
-    effect(() => {
-      const next = (child as () => Child)()
-      node.data =
-        next === null || next === undefined || next === false ? '' : String(next)
-    })
+    appendDynamic(parent, child as () => Child)
     return
   }
   parent.appendChild(document.createTextNode(String(child)))
+}
+
+/**
+ * Содержимое, которое пересчитывается.
+ *
+ * Живёт между двумя якорями, а не заменяет содержимое родителя: у
+ * родителя есть соседи, и `textContent = x` стёр бы их. Якоря — пустые
+ * комментарии: видны в инспекторе, в разметке места не занимают.
+ *
+ * Возвращённые узлы вставляются как есть, а не строкой, — иначе
+ * условное содержимое нельзя было бы выразить вовсе.
+ */
+function appendDynamic(parent: Node, child: () => Child): void {
+  const start = document.createComment('')
+  const end = document.createComment('')
+  parent.appendChild(start)
+  parent.appendChild(end)
+
+  effect(() => {
+    const next = child()
+    clearBetween(start, end)
+    insertBetween(start, end, next)
+  })
+}
+
+function clearBetween(start: Node, end: Node): void {
+  const parent = start.parentNode
+  if (parent === null) {
+    return
+  }
+  let node = start.nextSibling
+  while (node !== null && node !== end) {
+    const following = node.nextSibling
+    parent.removeChild(node)
+    node = following
+  }
+}
+
+function insertBetween(start: Node, end: Node, value: Child): void {
+  const parent = start.parentNode
+  if (parent === null) {
+    return
+  }
+  if (value === null || value === undefined || value === false) {
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value as readonly Child[]) {
+      insertBetween(start, end, item)
+    }
+    return
+  }
+  if (value instanceof Node) {
+    parent.insertBefore(value, end)
+    return
+  }
+  if (isFunction(value) || isList(value)) {
+    // Динамика внутри динамики означала бы эффект, заводимый на каждом
+    // пересчёте, — ровно та утечка, от которой слой и сторожат.
+    throw new Error(
+      'динамическое содержимое вернуло ещё одно динамическое: ' +
+        'разверните его отдельным when или each',
+    )
+  }
+  parent.insertBefore(document.createTextNode(String(value)), end)
+}
+
+/**
+ * Одна из двух ветвей.
+ *
+ * Ветвь пересобирается ТОЛЬКО при смене условия. Достигается это тем,
+ * что сама ветвь вызывается без отслеживания: иначе любое чтение внутри
+ * неё подписывало бы на себя внешний эффект, и один изменившийся счётчик
+ * пересобирал бы всю ветку целиком — с потерей фокуса и прокрутки.
+ *
+ * Привязки внутри ветви при этом работают как обычно: `untrack` снимает
+ * только текущего ЧИТАТЕЛЯ, владельца он не трогает, поэтому созданные
+ * внутри эффекты отслеживают своё и снимаются вместе с ветвью.
+ */
+export function when(
+  condition: () => boolean,
+  then: () => Child,
+  otherwise?: () => Child,
+): () => Child {
+  return () => {
+    const value = condition()
+    return untrack(() => {
+      if (value) {
+        return then()
+      }
+      return otherwise === undefined ? null : otherwise()
+    })
+  }
+}
+
+/**
+ * Список с ключами.
+ *
+ * КЛЮЧ ОБЯЗАТЕЛЕН, и это не педантизм. Без него список
+ * перерисовывается целиком при любом изменении: теряется фокус в полях,
+ * сбрасывается прокрутка, обрываются анимации. С ключом переживший
+ * элемент остаётся ТЕМ ЖЕ узлом DOM, а не похожим.
+ *
+ * @param render получает элемент и его номер ФУНКЦИЯМИ: значения
+ *               меняются, а узел остаётся, и передача по значению
+ *               означала бы пересборку узла ради изменившегося текста
+ */
+export function each<T>(
+  items: () => readonly T[],
+  key: (item: T, index: number) => string | number,
+  render: (item: () => T, index: () => number) => Node,
+): ListChild<T> {
+  return { kind: 'список', items, key, render }
+}
+
+interface Row<T> {
+  node: Node
+  item: WriteSignal<T>
+  index: WriteSignal<number>
+  dispose: () => void
+}
+
+function appendList<T>(parent: Node, list: ListChild<T>): void {
+  const start = document.createComment('')
+  const end = document.createComment('')
+  parent.appendChild(start)
+  parent.appendChild(end)
+
+  let rows = new Map<string | number, Row<T>>()
+  // Снятие строк — забота и размонтирования тоже: без этого области
+  // строк пережили бы весь список.
+  onCleanup(() => {
+    for (const row of rows.values()) {
+      row.dispose()
+    }
+    rows.clear()
+  })
+
+  effect(() => {
+    const next = list.items()
+    const owner = start.parentNode
+    if (owner === null) {
+      return
+    }
+
+    const kept = new Map<string | number, Row<T>>()
+    const order: Array<Row<T>> = []
+
+    next.forEach((item, index) => {
+      const id = list.key(item, index)
+      if (kept.has(id)) {
+        // Молчаливое совпадение ключей — худший исход: строки
+        // перепутываются между собой, и перерисовкой это не чинится.
+        throw new Error(
+          'ключ ' + String(id) + ' встретился в списке дважды',
+        )
+      }
+      const existing = rows.get(id)
+      if (existing !== undefined) {
+        // Значения обновляются, узел остаётся тем же. В этом весь ключ.
+        existing.item.value = item
+        existing.index.value = index
+        kept.set(id, existing)
+        order.push(existing)
+        return
+      }
+      // ОТВЯЗАННАЯ область, и это не мелочь. Строку строит эффект
+      // списка, а его повторный прогон снимает своих детей: обычная
+      // область умерла бы при первом же изменении списка, оставив на
+      // странице узел, который больше никогда не обновится. Снимает
+      // строку тот, кто её держит, — карта ниже и снятие всего списка.
+      const created = detachedRoot<Row<T>>((disposeRow) => {
+        const value = signal(item)
+        const at = signal(index)
+        const node = list.render(
+          () => value.value,
+          () => at.value,
+        )
+        return { node, item: value, index: at, dispose: disposeRow }
+      })
+      kept.set(id, created)
+      order.push(created)
+    })
+
+    for (const [id, row] of rows) {
+      if (!kept.has(id)) {
+        row.dispose()
+        if (row.node.parentNode === owner) {
+          owner.removeChild(row.node)
+        }
+      }
+    }
+    rows = kept
+
+    // Расстановка с конца: каждый узел встаёт перед уже поставленным.
+    // Двигается только тот, кто и правда не на месте: insertBefore узла,
+    // который уже там, всё равно снял бы его и вставил заново, а это
+    // потерянный фокус и оборванная анимация.
+    let after: Node = end
+    for (let i = order.length - 1; i >= 0; i--) {
+      const row = order[i]
+      if (row === undefined) {
+        continue
+      }
+      if (row.node.nextSibling !== after || row.node.parentNode !== owner) {
+        owner.insertBefore(row.node, after)
+      }
+      after = row.node
+    }
+  })
 }
 
 /**
