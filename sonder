@@ -90,9 +90,16 @@ cmd_check_eol() {
             if [ -f "$f" ] && grep -qU "$cr" "$f"; then echo "$f"; fi
           done)
   if [ -n "$bad" ]; then
-    echo "    файлы с CRLF (по .gitattributes ожидается LF):"
+    # Ищется БАЙТ CR, а не пара CRLF, и сообщение обязано говорить именно
+    # это. Живой 0x0D в текстовом файле бывает не только от Windows: он
+    # заводится, когда `\r` в кавычках теряет обратный слэш по дороге —
+    # heredoc так делает регулярно, и получившийся файл работает,
+    # выглядит правильно и краснеет здесь. Сказать «CRLF» значило бы
+    # отправить читателя искать не то.
+    echo "    файлы с байтом CR (0x0D), а по .gitattributes ожидается LF:"
     echo "$bad" | sed 's/^/      /'
-    echo "    починить: git add --renormalize . && git checkout -- ."
+    echo "    если это перевод строки: git add --renormalize . && git checkout -- ."
+    echo "    если байт внутри кавычек: вернуть два символа \\r"
     return 1
   fi
   echo "    все LF"

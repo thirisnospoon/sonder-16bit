@@ -137,7 +137,7 @@ echo "==> вывод ноды"
 docker logs "$NODE_NAME" 2>&1 | tail -20
 if [ -f "$WORK/NODE7.LOG" ]; then
   echo "    из NODE7.LOG:"
-  tr -d '' < "$WORK/NODE7.LOG" | sed 's/^/      /'
+  tr -d '\r' < "$WORK/NODE7.LOG" | sed 's/^/      /'
 else
   echo "    NODE7.LOG не написан: программа не дошла даже до первой строки"
 fi
