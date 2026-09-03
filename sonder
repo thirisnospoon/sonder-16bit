@@ -375,6 +375,17 @@ cmd_drain_bench() {
        -Dsonder.bench.events="$events" -DfailIfNoTests=false
 }
 
+# Сквозной прогон: гейтвей против НАСТОЯЩЕЙ ноды под DOSBox.
+#
+# Отдельной целью, а не в verify: требует эмулятора, общей сети хоста и
+# того, чтобы обе стороны поднялись в строгом порядке. Обычный прогон
+# обязан оставаться герметичным.
+cmd_e2e() {
+  ensure_dos
+  step "сквозной прогон: гейтвей и NODE-7"
+  bash ops/ci/run-e2e.sh
+}
+
 cmd_clean() {
   rm -rf spikes/*/out
   echo "сборочные артефакты удалены"
@@ -393,6 +404,7 @@ Sonder — цели
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
   check-node           собрать NODE-7 под i8086-msdos
+  e2e                  сквозной прогон: гейтвей против настоящей ноды
   soak-total           сколько накоплено фаззинга из требуемых суток
   drain-bench [N]      замер: за сколько разберётся завал из N событий
   check-generated      собрать и прогнать сгенерированный Pascal
@@ -427,6 +439,7 @@ case "${1:-help}" in
   soak)               shift; need_docker; cmd_soak "$@" ;;
   soak-total)         cmd_soak_total ;;
   check-node)         need_docker; cmd_check_node ;;
+  e2e)                need_docker; cmd_e2e ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;

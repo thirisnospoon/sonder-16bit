@@ -322,12 +322,54 @@ begin
 {$ENDIF}
 end;
 
+{ Куда нода сообщает, чем кончился её запуск.
+
+  Под DOSBox вывод программы уходит на эмулированный экран, а не наружу:
+  снаружи ноду не слышно вовсе, и «не поздоровалась» неотличимо от «не
+  запустилась». Файл закрывается сразу после записи — программа дальше
+  не возвращается, и недописанный буфер остался бы недописанным
+  навсегда. }
+procedure Note(const S: string);
+var
+  F: Text;
+begin
+{$I-}
+  Assign(F, 'NODE7.LOG');
+  Append(F);
+  if IOResult <> 0 then
+  begin
+    Rewrite(F);
+    if IOResult <> 0 then
+      Exit;
+  end;
+  WriteLn(F, S);
+  Close(F);
+{$I+}
+  if IOResult <> 0 then
+    ;
+end;
+
+{ Число строкой: WriteLn в файл умеет, но собирать из кусков удобнее
+  одной функцией, чем городить Write подряд. }
+function IntStr(V: LongInt): string;
+var
+  S: string;
+begin
+  Str(V, S);
+  IntStr := S;
+end;
+
 var
   I: Integer;
   R: TResult;
+  Tick, NextNote: LongInt;
+  Notes: Integer;
+  PS: TPortStats;
+  MS: TMuxStats;
 
 begin
   WriteLn('NODE-7');
+  Note('NODE-7 стартовала');
 
   for I := FirstDataChan to LastDataChan do
   begin
@@ -335,6 +377,7 @@ begin
     if Ctx[I] = nil then
     begin
       WriteLn('не хватило дальней кучи на канал ', I);
+      Note('не хватило дальней кучи');
       Halt(1);
     end;
     FillChar(Ctx[I]^, SizeOf(TChanCtx), 0);
@@ -342,6 +385,7 @@ begin
     if not R.Ok then
     begin
       WriteLn('не создалась арена канала ', I);
+      Note('не создалась арена канала');
       Halt(1);
     end;
   end;
@@ -354,14 +398,42 @@ begin
   if not R.Ok then
   begin
     WriteLn('не открылся порт');
+    Note('НЕ ОТКРЫЛСЯ ПОРТ: ' + R.Code);
     Halt(1);
   end;
 
   WriteLn('порт открыт, ждём гейтвей');
+  Note('порт открыт, каналов ' + Chr(Ord('0') + LastDataChan div 10)
+       + Chr(Ord('0') + LastDataChan mod 10));
 
   { Цикл до конца света. Останавливать ноду нечем и незачем: она живёт
     столько же, сколько эмулятор, а её остановка — это остановка
-    эмулятора. }
+    эмулятора.
+
+    Счётчики выкладываются несколько раз в начале жизни и потом
+    перестают: под эмулятором ноду не слышно, и «байты не идут»
+    неотличимо от «идут, но не туда». Писать их постоянно нельзя —
+    запись в файл под DOS стоит дороже самого цикла. }
+  NextNote := 18;
+  Notes := 0;
   while True do
-    PortPump(NowTicks);
+  begin
+    Tick := NowTicks;
+    PortPump(Tick);
+    if (Notes < 4) and (Tick >= NextNote) then
+    begin
+      PS := PortGetStats;
+      MS := MuxGetStats;
+      Note('тик ' + IntStr(Tick)
+           + ' tx=' + IntStr(PS.TxBytes)
+           + ' rx=' + IntStr(PS.RxBytes)
+           + ' err=' + IntStr(PS.LineErrs)
+           + ' idle=' + IntStr(PS.Idles)
+           + ' послано=' + IntStr(MS.Sent)
+           + ' принято=' + IntStr(MS.Received)
+           + ' команд=' + IntStr(MS.Commands));
+      Inc(Notes);
+      NextNote := Tick + 36;
+    end;
+  end;
 end.
