@@ -1,0 +1,110 @@
+# Sonder целиком.
+#
+#   docker compose up --build
+#
+# Четыре части, и порядок между ними важен по-настоящему:
+#
+#   db    Firebird 5 — состояние
+#   app   оболочка на Java: HTTP наружу, линия к ноде внутрь
+#   node  NODE-7 под DOSBox — доменное ядро, шестнадцать бит
+#   web   статика и обратный прокси
+#
+# НОДА ПОДКЛЮЧАЕТСЯ САМА, и это не мелочь конфигурации. Нульмодем DOSBox
+# — КЛИЕНТ: он идёт на порт оболочки, а не наоборот. Оболочка обязана
+# слушать раньше, чем поднимется эмулятор, иначе тот придёт на закрытый
+# порт, не дождётся и не повторит. `depends_on` этого не обеспечивает —
+# он говорит лишь о том, что контейнер запущен, — поэтому нода ждёт порт
+# сама, в своей точке входа.
+
+name: sonder
+
+services:
+  db:
+    image: firebirdsql/firebird:5
+    environment:
+      FIREBIRD_ROOT_PASSWORD: ${SONDER_DB_PASSWORD:-masterkey}
+      FIREBIRD_DATABASE: sonder.fdb
+      # Устаревшая аутентификация: Jaybird 4 — последний, работающий на
+      # восьмёрке (ADR-0004), и договориться с Srp он не умеет.
+      FIREBIRD_USE_LEGACY_AUTH: "true"
+    volumes:
+      - db-data:/var/lib/firebird/data
+    healthcheck:
+      # Готовность — по ФАЙЛУ базы, а не по открытому порту: порт
+      # слушается раньше, чем база создана, и первое же подключение
+      # тогда падает «файл не найден».
+      test: ["CMD", "test", "-f", "/var/lib/firebird/data/sonder.fdb"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+
+  app:
+    build:
+      context: .
+      dockerfile: ops/compose/Dockerfile.app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SONDER_DB_URL: jdbc:firebirdsql://db:3050//var/lib/firebird/data/sonder.fdb?encoding=UTF8
+      SONDER_DB_USER: sysdba
+      SONDER_DB_PASSWORD: ${SONDER_DB_PASSWORD:-masterkey}
+      # Линия, а не адрес: ядро настоящее и живёт за нульмодемом.
+      # Задать заодно и SONDER_DECIDER_ENDPOINT нельзя — приложение
+      # откажется подниматься, и это правильный исход.
+      SONDER_DECIDER_LINE_PORT: "5077"
+      SONDER_DECIDER_LINE_TIMEOUT_MS: "5000"
+      # Локальный подъём идёт по обычному HTTP, и кука с Secure до
+      # браузера не доедет — он выбросит её молча, а вход будет
+      # выглядеть сломанным без единого сообщения. В бою за TLS это
+      # значение обязано быть true, и оно там по умолчанию.
+      SONDER_SESSION_COOKIE_SECURE: "false"
+    healthcheck:
+      # ЖИВОСТЬ, а не общее здоровье. Общее включает состояние ноды, а
+      # нода ждёт эту самую проверку, чтобы подключиться: вышла бы
+      # взаимная блокировка, и выглядела бы она как вечное
+      # «health: starting», без единого слова о причине.
+      #
+      # curl, а не /dev/tcp: CMD-SHELL идёт через /bin/sh, в этом образе
+      # это dash, и /dev/tcp он не умеет — проверка молча не проходила
+      # бы никогда.
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --output
+        - /dev/null
+        - http://127.0.0.1:8080/actuator/health/liveness
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+
+  node:
+    build:
+      context: .
+      dockerfile: ops/compose/Dockerfile.node
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      SONDER_LINE_HOST: app
+      SONDER_LINE_PORT: "5077"
+    # Нода — единственная часть, чей перезапуск безопасен всегда: она без
+    # состояния, а команды в работе оболочка роняет отказом сама.
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: ops/compose/Dockerfile.web
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${SONDER_WEB_PORT:-8080}:80"
+
+volumes:
+  db-data:

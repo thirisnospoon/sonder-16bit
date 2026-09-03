@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
 import sonder.contract.decider.Decider;
@@ -140,10 +140,10 @@ public class UserController {
 
     @GetMapping("/users/{nick}")
     public ResponseEntity<Map<String, Object>> getUser(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws SQLException {
         String traceId = newTraceId();
-        if (actor(auth) == null) {
+        if (actor(token) == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
 
@@ -169,10 +169,10 @@ public class UserController {
 
     @PutMapping("/users/{nick}/follow")
     public ResponseEntity<Map<String, Object>> follow(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws Exception {
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -198,10 +198,10 @@ public class UserController {
 
     @DeleteMapping("/users/{nick}/follow")
     public ResponseEntity<Map<String, Object>> unfollow(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick) throws Exception {
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -227,11 +227,11 @@ public class UserController {
 
     @PostMapping("/admin/users/{nick}/ban")
     public ResponseEntity<Map<String, Object>> banUser(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String nick,
             @RequestBody(required = false) BanRequest request) throws Exception {
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -262,8 +262,7 @@ public class UserController {
         }
     }
 
-    private String actor(String auth) throws SQLException {
-        String token = AuthController.bearer(auth);
+    private String actor(String token) throws SQLException {
         if (token == null) {
             return null;
         }

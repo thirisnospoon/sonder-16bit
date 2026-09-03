@@ -1,0 +1,29 @@
+# NODE-7 под DOSBox.
+#
+# Шестнадцатибитная программа собирается кросс-компилятором на ступени
+# сборки и исполняется эмулятором на ступени запуска. Обе ступени — один
+# и тот же образ инструментария: в нём есть и FPC для i8086, и DOSBox, а
+# заводить второй образ ради одного бинарника значило бы держать две
+# версии одной среды.
+
+FROM sonder/dos-toolchain:3.2.2 AS build
+WORKDIR /src
+
+COPY contracts/ contracts/
+COPY dosnode/ dosnode/
+RUN bash dosnode/build/build.sh --target msdos \
+      --main dosnode/src/node7.pas --out NODE7 --outdir node
+
+FROM sonder/dos-toolchain:3.2.2
+WORKDIR /node
+
+# Эмулятору не нужны ни экран, ни звук: он работает в контейнере и
+# разговаривает только через нульмодем.
+ENV SDL_VIDEODRIVER=dummy \
+    SDL_AUDIODRIVER=dummy
+
+COPY --from=build /src/dosnode/build/out/msdos-node/NODE7.EXE /node/
+COPY ops/compose/dosbox.conf /node/dosbox.conf
+COPY ops/compose/node-entrypoint.sh /node/entrypoint.sh
+
+ENTRYPOINT ["bash", "/node/entrypoint.sh"]

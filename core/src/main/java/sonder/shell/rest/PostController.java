@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
 import sonder.contract.decider.Decider;
@@ -66,14 +66,14 @@ public class PostController {
 
     @PostMapping("/posts")
     public ResponseEntity<Map<String, Object>> createPost(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @RequestBody(required = false) CreateRequest request)
             throws Exception {
         // Идентификатор трассировки заводится ДО первой возможной ошибки:
         // контракт требует его в теле любого отказа, в том числе отказа
         // по сессии.
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -99,10 +99,10 @@ public class PostController {
 
     @DeleteMapping("/posts/{postId}")
     public ResponseEntity<Map<String, Object>> deletePost(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String postId) throws Exception {
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -125,10 +125,10 @@ public class PostController {
 
     @GetMapping("/posts/{postId}")
     public ResponseEntity<Map<String, Object>> getPost(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @PathVariable String postId) throws SQLException {
         String traceId = newTraceId();
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -167,8 +167,7 @@ public class PostController {
         }
     }
 
-    private String actor(String auth) throws SQLException {
-        String token = AuthController.bearer(auth);
+    private String actor(String token) throws SQLException {
         if (token == null) {
             return null;
         }

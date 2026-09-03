@@ -3,7 +3,7 @@ package sonder.shell.rest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import sonder.contract.ErrorCode;
@@ -51,10 +51,10 @@ public class EventsController {
     // увидев SseEmitter.
     @GetMapping("/events")
     public Object subscribe(
-            @RequestHeader(value = "Authorization", required = false) String auth)
+            @CookieValue(value = SessionCookie.NAME, required = false) String token)
             throws SQLException {
 
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             // Отказ отдаётся обычным телом ошибки, а не потоком: клиент,
             // получивший поток, стал бы ждать в нём событий, которых
@@ -67,8 +67,7 @@ public class EventsController {
         return stream.open(actorId, timeoutMillis);
     }
 
-    private String actor(String auth) throws SQLException {
-        String token = AuthController.bearer(auth);
+    private String actor(String token) throws SQLException {
         if (token == null) {
             return null;
         }

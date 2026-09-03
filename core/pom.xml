@@ -124,6 +124,30 @@
         дрейфа. Здесь проверять нечего: код порождается заново при каждой
         сборке из того же WSDL, и разойтись ему не с чем и негде.
       -->
+      <!--
+        Исполняемый jar.
+
+        До сих пор приложение поднимали только тесты, и обычный jar их
+        устраивал: классы и зависимости им даёт Maven. Запустить такой
+        jar нельзя — «no main manifest attribute», — и обнаружилось это
+        ровно тогда, когда система впервые поднялась целиком. Проверки,
+        которая ловила бы это раньше, нет и быть не могло: она и есть
+        запуск.
+
+        Плагин делает из обычного jar исполняемый, вкладывая внутрь
+        зависимости. Прежний остаётся рядом с классификатором
+        `original` — им пользуются интеграционные тесты.
+      -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals><goal>repackage</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>org.apache.cxf</groupId>
         <artifactId>cxf-codegen-plugin</artifactId>

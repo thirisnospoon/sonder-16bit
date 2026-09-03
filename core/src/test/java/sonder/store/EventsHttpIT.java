@@ -130,15 +130,14 @@ class EventsHttpIT {
         Map<String, String> creds = new LinkedHashMap<>();
         creds.put("nick", "andrey");
         creds.put("password", "тайна");
-        token = http.postForEntity("/auth/login", creds, Map.class)
-                .getBody().get("token").toString();
+        token = sessionOf(http.postForEntity("/auth/login", creds, Map.class));
     }
 
     private HttpURLConnection openStream(String bearer) throws Exception {
         HttpURLConnection conn = (HttpURLConnection)
                 new URL("http://localhost:" + port + "/events").openConnection();
         if (bearer != null) {
-            conn.setRequestProperty("Authorization", "Bearer " + bearer);
+            conn.setRequestProperty("Cookie", "sonder_session=" + bearer);
         }
         conn.setReadTimeout(READ_TIMEOUT_MS);
         conn.setConnectTimeout(READ_TIMEOUT_MS);
@@ -224,4 +223,23 @@ class EventsHttpIT {
             c.commit();
         }
     }
+
+    /**
+     * Значение куки сессии из ответа на вход.
+     *
+     * <p>Контракт объявляет вход так: 204 и кука. Токена в теле нет и
+     * быть не должно — всякое место, куда клиент его положил бы,
+     * читается сценарием, попавшим на страницу.
+     */
+    private static String sessionOf(org.springframework.http.ResponseEntity<?> login) {
+        String header = login.getHeaders().getFirst(
+                org.springframework.http.HttpHeaders.SET_COOKIE);
+        if (header == null) {
+            throw new AssertionError("вход не выдал куки");
+        }
+        int eq = header.indexOf('=');
+        int end = header.indexOf(';');
+        return header.substring(eq + 1, end < 0 ? header.length() : end);
+    }
+
 }

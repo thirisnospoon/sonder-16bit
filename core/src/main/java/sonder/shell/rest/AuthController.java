@@ -4,20 +4,21 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
 import sonder.shell.auth.Passwords;
 import sonder.shell.auth.SessionStore;
 
+import javax.servlet.http.HttpServletResponse;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -48,8 +49,39 @@ public class AuthController {
 
     private final DataSource dataSource;
 
-    public AuthController(DataSource dataSource) {
+    /**
+     * Отдавать ли куку только по HTTPS.
+     *
+     * <p>По умолчанию да. Выключается на локальном подъёме по обычному
+     * HTTP: браузер иначе просто выбросит куку, и вход не заработает
+     * вовсе — причём молча, потому что запрос уйдёт без неё и вернётся
+     * законным «сессия недействительна».
+     *
+     * <p>Настройкой, а не догадкой по схеме запроса: за прокси схема
+     * приходит из заголовка, которому верить нельзя, и незаметно
+     * выключенный {@code Secure} однажды уехал бы в бой.
+     */
+    private final boolean cookieSecure;
+
+    /**
+     * Сколько живёт кука.
+     *
+     * <p>Умолчание берётся у самой сессии, а не пишется числом рядом:
+     * кука, живущая дольше сессии, шлётся браузером ещё сутки после
+     * того, как сессия умерла, и пользователь получает «войдите заново»
+     * там, где мог бы просто увидеть форму входа. Кука короче сессии —
+     * тоже расхождение, только в другую сторону.
+     */
+    private final long cookieMaxAge;
+
+    public AuthController(
+            DataSource dataSource,
+            @Value("${sonder.session.cookie-secure:true}") boolean cookieSecure,
+            @Value("${sonder.session.max-age-seconds:#{null}}") Long cookieMaxAge) {
         this.dataSource = dataSource;
+        this.cookieSecure = cookieSecure;
+        this.cookieMaxAge =
+                cookieMaxAge == null ? SessionStore.TTL.getSeconds() : cookieMaxAge;
     }
 
     /** Тело запроса на вход. */
@@ -74,8 +106,20 @@ public class AuthController {
         }
     }
 
+    /**
+     * Вход.
+     *
+     * <p>Отвечает ПУСТЫМ телом и кукой, как объявляет контракт. Токен в
+     * теле клиенту пришлось бы где-то держать, а всякое такое место
+     * читается сценарием, попавшим на страницу; кука с {@code HttpOnly}
+     * не читается ничем. Оболочка отдавала токен телом до первого
+     * настоящего подъёма системы — проверка маршрутов сверяет пути и
+     * методы, а не то, чем оканчивается вход.
+     */
     @PostMapping("/auth/login")
-    public ResponseEntity<Map<String, Object>> login(@RequestBody(required = false) LoginRequest request)
+    public ResponseEntity<Map<String, Object>> login(
+            @RequestBody(required = false) LoginRequest request,
+            HttpServletResponse response)
             throws SQLException {
         String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
         String nick = request == null ? null : request.getNick();
@@ -107,19 +151,23 @@ public class AuthController {
             }
 
             String token = SessionStore.open(c, userId, Instant.now());
-            return ResponseEntity.ok(
-                    Collections.<String, Object>singletonMap("token", token));
+            SessionCookie.issue(response, token, cookieSecure, cookieMaxAge);
+            return ResponseEntity.noContent().build();
         }
     }
 
     @PostMapping("/auth/logout")
     public ResponseEntity<Void> logout(
-            @RequestHeader(value = "Authorization", required = false) String auth)
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
+            HttpServletResponse response)
             throws SQLException {
-        String token = bearer(auth);
         try (Connection c = dataSource.getConnection()) {
             SessionStore.revoke(c, token);
         }
+        // Куку снимаем в любом случае: пользователь нажал «выйти», и
+        // остаться с живой кукой он не должен, даже если сессии в базе
+        // уже не было.
+        SessionCookie.clear(response, cookieSecure);
         // Выход идемпотентен: отсутствие сессии — не ошибка. Сообщать «её и
         // не было» значило бы подтверждать угаданный токен.
         return ResponseEntity.noContent().build();
@@ -127,10 +175,9 @@ public class AuthController {
 
     @GetMapping("/auth/me")
     public ResponseEntity<Map<String, Object>> me(
-            @RequestHeader(value = "Authorization", required = false) String auth)
+            @CookieValue(value = SessionCookie.NAME, required = false) String token)
             throws SQLException {
         String traceId = "t-" + java.util.UUID.randomUUID().toString().replace("-", "");
-        String token = bearer(auth);
         try (Connection c = dataSource.getConnection()) {
             String userId = SessionStore.userOf(c, token, Instant.now());
             if (userId == null) {
@@ -154,19 +201,6 @@ public class AuthController {
                 }
             }
         }
-    }
-
-    /** Токен из заголовка. Схема Bearer, без неё — ничего. */
-    static String bearer(String header) {
-        if (header == null) {
-            return null;
-        }
-        String prefix = "Bearer ";
-        if (!header.startsWith(prefix)) {
-            return null;
-        }
-        String token = header.substring(prefix.length()).trim();
-        return token.isEmpty() ? null : token;
     }
 
 }

@@ -100,26 +100,50 @@ class AuthHttpIT {
     private static HttpEntity<Void> withToken(String token) {
         HttpHeaders headers = new HttpHeaders();
         if (token != null) {
-            headers.set("Authorization", "Bearer " + token);
+            headers.set(HttpHeaders.COOKIE, "sonder_session=" + token);
         }
         return new HttpEntity<>(headers);
     }
 
+    /**
+     * Вход отвечает ровно так, как объявляет контракт.
+     *
+     * <p>Эта проверка написана после того, как расхождение нашлось не
+     * ею. Оболочка отдавала токен ТЕЛОМ ответа, а контракт говорит:
+     * «Сессия выдаётся кукой HttpOnly; Secure; SameSite=Strict. Токенов
+     * в localStorage нет: их читает любой скрипт на странице». Сверка
+     * маршрутов такого не ловит — она смотрит пути и методы, а не то,
+     * чем оканчивается вход, — и держалось расхождение до первого
+     * настоящего подъёма всей системы, когда фронт, построенный по
+     * контракту, не смог войти.
+     *
+     * <p>Поэтому сверяются ВСЕ объявленные свойства, а не факт успеха.
+     */
     @Test
-    @DisplayName("верные учётные данные дают токен")
+    @DisplayName("вход отвечает 204 и кукой, а не токеном в теле")
     void loginSucceeds() {
         ResponseEntity<Map> response = login("andrey", "тайна");
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertNotNull(response.getBody());
-        Object token = response.getBody().get("token");
-        assertNotNull(token, "токен не выдан");
-        assertEquals(43, token.toString().length(), "длина токена не та");
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode(),
+                "контракт объявляет 204");
+        assertNull(response.getBody(), "тело у ответа на вход быть не должно");
+
+        String header = response.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
+        assertNotNull(header, "вход не выдал куки");
+        assertTrue(header.startsWith("sonder_session="), "чужая кука: " + header);
+        assertTrue(header.contains("HttpOnly"),
+                "кука читается скриптом — ровно то, что контракт запрещает");
+        assertTrue(header.contains("SameSite=Strict"),
+                "без SameSite кука поедет с чужой страницы");
+
+        assertEquals(43, sessionOf(response).length(), "длина токена не та");
     }
 
     @Test
     @DisplayName("ник узнаётся без учёта регистра")
     void loginIgnoresNickCase() {
-        assertEquals(HttpStatus.OK, login("ANDREY", "тайна").getStatusCode());
+        assertEquals(
+                HttpStatus.NO_CONTENT, login("ANDREY", "тайна").getStatusCode());
     }
 
     /**
@@ -147,7 +171,7 @@ class AuthHttpIT {
     @Test
     @DisplayName("токен опознаёт пользователя, кириллица доезжает")
     void meReturnsUser() {
-        String token = login("andrey", "тайна").getBody().get("token").toString();
+        String token = sessionOf(login("andrey", "тайна"));
 
         ResponseEntity<Map> me = http.exchange("/auth/me", HttpMethod.GET,
                 withToken(token), Map.class);
@@ -180,7 +204,7 @@ class AuthHttpIT {
     @Test
     @DisplayName("заголовок без схемы Bearer не принимается")
     void rawHeaderIsNotAToken() {
-        String token = login("andrey", "тайна").getBody().get("token").toString();
+        String token = sessionOf(login("andrey", "тайна"));
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", token);
@@ -193,7 +217,7 @@ class AuthHttpIT {
     @Test
     @DisplayName("после выхода токен не действует, повторный выход не ошибка")
     void logoutIsIdempotent() {
-        String token = login("andrey", "тайна").getBody().get("token").toString();
+        String token = sessionOf(login("andrey", "тайна"));
 
         ResponseEntity<Void> first = http.exchange("/auth/logout", HttpMethod.POST,
                 withToken(token), Void.class);
@@ -219,7 +243,7 @@ class AuthHttpIT {
     @Test
     @DisplayName("сессия хранится в базе, а не в памяти")
     void sessionIsPersisted() throws SQLException {
-        String token = login("andrey", "тайна").getBody().get("token").toString();
+        String token = sessionOf(login("andrey", "тайна"));
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(
                      "SELECT user_id FROM sessions WHERE token = ?")) {
@@ -257,4 +281,23 @@ class AuthHttpIT {
         factory.setOutputStreaming(false);
         http.getRestTemplate().setRequestFactory(factory);
     }
+
+    /**
+     * Значение куки сессии из ответа на вход.
+     *
+     * <p>Контракт объявляет вход так: 204 и кука. Токена в теле нет и
+     * быть не должно — всякое место, куда клиент его положил бы,
+     * читается сценарием, попавшим на страницу.
+     */
+    private static String sessionOf(org.springframework.http.ResponseEntity<?> login) {
+        String header = login.getHeaders().getFirst(
+                org.springframework.http.HttpHeaders.SET_COOKIE);
+        if (header == null) {
+            throw new AssertionError("вход не выдал куки");
+        }
+        int eq = header.indexOf('=');
+        int end = header.indexOf(';');
+        return header.substring(eq + 1, end < 0 ? header.length() : end);
+    }
+
 }

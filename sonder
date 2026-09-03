@@ -314,6 +314,21 @@ cmd_web() {
   bash ops/ci/web.sh "${1:-test}" || return 1
 }
 
+cmd_up() {
+  need_docker
+  step "система целиком"
+  # --build каждый раз: образы собираются из этого же дерева, и запуск
+  # вчерашнего образа поверх сегодняшнего кода — самый дешёвый способ
+  # полдня искать несуществующий дефект.
+  docker compose up --build "$@"
+}
+
+cmd_down() {
+  need_docker
+  step "остановка"
+  docker compose down "$@"
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -444,6 +459,8 @@ Sonder — цели
   java [цели]          сборка и тесты оболочки, по умолчанию verify
   java-it              интеграционные тесты оболочки против Firebird
   web [цель]           сборка и тесты фронта; lock — пересчёт замка зависимостей
+  up                   поднять систему целиком: база, оболочка, NODE-7, фронт
+  down                 остановить и убрать
   clean                удалить сборочные артефакты
 
 Состояние: фаза 0 пройдена, фаза 1 в работе.
@@ -473,6 +490,8 @@ case "${1:-help}" in
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
   web)                shift; cmd_web "$@" ;;
+  up)                 shift; cmd_up "$@" ;;
+  down)               shift; cmd_down "$@" ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;
   *) echo "неизвестная цель: $1"; echo; cmd_help; exit 64 ;;

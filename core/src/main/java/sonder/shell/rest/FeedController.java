@@ -2,7 +2,7 @@ package sonder.shell.rest;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
@@ -53,13 +53,13 @@ public class FeedController {
 
     @GetMapping("/feed")
     public ResponseEntity<Map<String, Object>> getFeed(
-            @RequestHeader(value = "Authorization", required = false) String auth,
+            @CookieValue(value = SessionCookie.NAME, required = false) String token,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "limit", required = false) Integer limit)
             throws SQLException {
 
         String traceId = "t-" + UUID.randomUUID().toString().replace("-", "");
-        String actorId = actor(auth);
+        String actorId = actor(token);
         if (actorId == null) {
             return RestErrors.of(ErrorCode.SESSION_INVALID, traceId);
         }
@@ -162,8 +162,7 @@ public class FeedController {
         return sb.toString();
     }
 
-    private String actor(String auth) throws SQLException {
-        String token = AuthController.bearer(auth);
+    private String actor(String token) throws SQLException {
         if (token == null) {
             return null;
         }
