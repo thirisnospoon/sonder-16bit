@@ -361,6 +361,18 @@ cmd_trace() {
   bash ops/ci/trace.sh || return 1
 }
 
+# Нагрузочный профиль. Гейт Ф10: отчёт с графиками насыщения и
+# подтверждённым потолком записи.
+#
+# Четыре минуты и несколько сотен записей в базе — поэтому не в verify.
+# Против ПОДНЯТОЙ системы: мерить запись мимо настоящего ядра значит
+# мерить не ту систему.
+cmd_bench() {
+  need_docker
+  step "нагрузочный профиль"
+  bash ops/ci/bench.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -495,6 +507,7 @@ Sonder — цели
   e2e-web              сценарии в браузере против поднятой системы
   lighthouse           замер Lighthouse: три прогона, медиана, порог 90
   trace                сквозной след: заголовок, оболочка, NODE-7, outbox
+  bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
 
@@ -523,6 +536,7 @@ case "${1:-help}" in
   e2e)                need_docker; cmd_e2e ;;
   lighthouse)         cmd_lighthouse ;;
   trace)              cmd_trace ;;
+  bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
