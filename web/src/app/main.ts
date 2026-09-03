@@ -7,7 +7,7 @@
  * единственный, который нельзя вызвать из теста без браузера.
  */
 import { createClient } from '../core/api.js'
-import { h, mount, type Child } from '../core/dom.js'
+import { h, mount, when, type Child } from '../core/dom.js'
 import { createRouter } from '../core/router.js'
 import { потокСессии } from './stream.js'
 import { createSession } from './session.js'
@@ -17,7 +17,7 @@ import { страницаЛенты } from './pages/feed.js'
 import { страницаПрофиля } from './pages/profile.js'
 import { страницаПоста } from './pages/post.js'
 import { страницаМодерации } from './pages/moderation.js'
-import { пусто } from './parts.js'
+import { нетСвязи, пусто } from './parts.js'
 
 const client = createClient('/api')
 const session = createSession(client)
@@ -37,6 +37,25 @@ mount(корень, () =>
     'div',
     null,
     шапка(),
+    // Недоступный сервер — сообщение НАД страницей, а не внутри каждой.
+    // Он касается всех: и ленты, и профиля, и формы входа. Разложить
+    // его по страницам значило бы завести пять экземпляров одного
+    // сообщения, четыре из которых однажды отстанут от пятого.
+    () =>
+      h(
+        'div',
+        { class: 'полоса', style: { 'padding-bottom': '0' } },
+        when(
+          () => session.who.value.state === 'нет связи',
+          () => {
+            const кто = session.who.value
+            return нетСвязи(
+              кто.state === 'нет связи' ? кто.why : '',
+              () => void session.refresh(),
+            )
+          },
+        ),
+      ),
     // Страница — обычное динамическое содержимое: сменился маршрут,
     // сменилось поддерево. Ничего сверх этого маршрутизации не нужно.
     () => страница(),
