@@ -9,7 +9,9 @@
     "test": "tsc --build && node --test build/test/"
   },
   "devDependencies": {
+    "@types/jsdom": "21.1.7",
     "@types/node": "20.12.12",
+    "jsdom": "24.1.0",
     "typescript": "5.4.5"
   }
 }
