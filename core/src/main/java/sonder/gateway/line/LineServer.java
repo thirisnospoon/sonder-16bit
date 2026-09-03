@@ -49,6 +49,21 @@ public final class LineServer implements AutoCloseable {
      */
     public static final int IDLE_MILLIS = 200;
 
+    /**
+     * Буфер отправки, подогнанный под скорость линии.
+     *
+     * <p>По умолчанию ядро даёт на петлевом сокете мегабайты, и это здесь
+     * не подарок, а беда: линия идёт 11 503 Б/с (S2), и два мегабайта в
+     * буфере — это три минуты очереди, о которой не знает никто. Запись
+     * возвращается мгновенно, отправитель считает команду ушедшей, а она
+     * ещё минуту лежит в ядре.
+     *
+     * <p>Восемь килобайт — примерно семь десятых секунды линии. Запись
+     * упирается, когда нода не успевает, и упирается вовремя: обратное
+     * давление доходит до отправителя, а не копится в невидимой очереди.
+     */
+    public static final int SEND_BUFFER_BYTES = 8192;
+
     private final int port;
     private final FrameDecoder decoder = new FrameDecoder();
     private final AtomicReference<Socket> live = new AtomicReference<>();
@@ -122,6 +137,7 @@ public final class LineServer implements AutoCloseable {
                 }
                 socket.setTcpNoDelay(true);
                 socket.setSoTimeout(IDLE_MILLIS);
+                socket.setSendBufferSize(SEND_BUFFER_BYTES);
                 connects.incrementAndGet();
                 log.info("нода подключилась: {}", socket.getRemoteSocketAddress());
 
