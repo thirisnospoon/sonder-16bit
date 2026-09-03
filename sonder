@@ -184,6 +184,7 @@ cmd_verify() {
   cmd_contracts_selftest  || rc=1
   cmd_check_drift         || rc=1
   cmd_check_generated     || rc=1
+  cmd_check_node          || rc=1
   cmd_test                || rc=1
   # Java входит в verify с самого начала. Проверка, охватывающая половину
   # кодовой базы, уже один раз позволила регрессии просидеть несколько
@@ -204,6 +205,19 @@ cmd_check_generated() {
   ensure_dos
   step "сгенерированный Pascal собирается и работает"
   run_dos bash dosnode/build/compile-generated.sh
+}
+
+# NODE-7 собирается под тот таргет, на котором поедет.
+#
+# Программа связывает все модули разом, и сломать её может изменение
+# любого из них: подпись обработчика, размер записи, имя константы.
+# Собирается она при этом только под i8086 — на нативном таргете нет ни
+# часов BIOS, ни портов, — поэтому обычный дуальный прогон её не
+# трогает, и без отдельного шага она тихо перестала бы собираться.
+cmd_check_node() {
+  ensure_dos
+  step "NODE-7 собирается под i8086-msdos"
+  run_dos bash -c 'bash dosnode/build/build.sh --target msdos       --main dosnode/src/node7.pas --out NODE7 --outdir node'     || return 1
 }
 
 # Тесты TurboCore на обоих таргетах. Расхождение между ними — дефект,
@@ -378,6 +392,7 @@ Sonder — цели
   contracts-selftest   убедиться, что валидатор ловит дефекты
   codegen              перегенерировать код из контрактов
   check-drift          убедиться, что сгенерированное совпадает с контрактами
+  check-node           собрать NODE-7 под i8086-msdos
   soak-total           сколько накоплено фаззинга из требуемых суток
   drain-bench [N]      замер: за сколько разберётся завал из N событий
   check-generated      собрать и прогнать сгенерированный Pascal
@@ -411,6 +426,7 @@ case "${1:-help}" in
   spikes)             cmd_spikes ;;
   soak)               shift; need_docker; cmd_soak "$@" ;;
   soak-total)         cmd_soak_total ;;
+  check-node)         need_docker; cmd_check_node ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
   java-it)            need_docker; cmd_java_it ;;
