@@ -9,7 +9,7 @@
 import { createClient } from '../core/api.js'
 import { h, mount, type Child } from '../core/dom.js'
 import { createRouter } from '../core/router.js'
-import { openStream } from '../core/stream.js'
+import { потокСессии } from './stream.js'
 import { createSession } from './session.js'
 import { PAGES } from './routes.js'
 import { страницаВхода } from './pages/login.js'
@@ -22,7 +22,7 @@ import { пусто } from './parts.js'
 const client = createClient('/api')
 const session = createSession(client)
 const router = createRouter(PAGES, 'нет')
-const stream = openStream(client.url('subscribe'))
+const stream = потокСессии(client, session)
 
 const корень = document.getElementById('приложение')
 if (корень === null) {
