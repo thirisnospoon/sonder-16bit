@@ -1,0 +1,354 @@
+/*
+ * Оформление Sonder.
+ *
+ * Ничего ретро. Внутри системы шестнадцатибитное ядро под DOS, но по
+ * странице это не должно быть заметно ни единой чертой: зелёный текст на
+ * чёрном и пиксельный шрифт превратили бы инженерное решение в костюм
+ * (ADR-0001).
+ *
+ * Свойств CSS ровно столько, сколько нужно; препроцессора нет по той же
+ * причине, по какой нет сборщика.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Шкала отступов: одна восьмёрка, умноженная. Произвольные числа в
+     разметке — вернейший способ получить сетку, которая почти сходится. */
+  --шаг-1: 4px;
+  --шаг-2: 8px;
+  --шаг-3: 12px;
+  --шаг-4: 16px;
+  --шаг-5: 24px;
+  --шаг-6: 32px;
+  --шаг-7: 48px;
+
+  --радиус: 12px;
+  --радиус-малый: 8px;
+
+  --фон: #fbfbfd;
+  --фон-карточки: #ffffff;
+  --фон-мягкий: #f2f2f7;
+  --граница: #e4e4ea;
+  --текст: #16161a;
+  --текст-тусклый: #63636e;
+  --акцент: #3b5bdb;
+  --акцент-текст: #ffffff;
+  --акцент-мягкий: #eaefff;
+  --опасность: #c92a2a;
+  --успех: #2b8a3e;
+
+  --тень-1: 0 1px 2px rgba(16, 16, 24, 0.05);
+  --тень-2: 0 4px 16px rgba(16, 16, 24, 0.08);
+
+  --шрифт: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --шрифт-моно: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --фон: #0f0f12;
+    --фон-карточки: #17171c;
+    --фон-мягкий: #1e1e25;
+    --граница: #2a2a33;
+    --текст: #f2f2f5;
+    --текст-тусклый: #a0a0ad;
+    --акцент: #748ffc;
+    --акцент-текст: #0f0f12;
+    --акцент-мягкий: #1c2340;
+    --опасность: #ff8787;
+    --успех: #69db7c;
+
+    --тень-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --тень-2: 0 4px 16px rgba(0, 0, 0, 0.5);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--фон);
+  color: var(--текст);
+  font-family: var(--шрифт);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Скрытая ссылка обхода: появляется только под фокусом клавиатуры. */
+.skip {
+  position: absolute;
+  left: var(--шаг-4);
+  top: calc(-1 * var(--шаг-7));
+  z-index: 10;
+  padding: var(--шаг-2) var(--шаг-4);
+  border-radius: var(--радиус-малый);
+  background: var(--акцент);
+  color: var(--акцент-текст);
+  text-decoration: none;
+  transition: top 120ms ease;
+}
+
+.skip:focus {
+  top: var(--шаг-4);
+}
+
+.noscript {
+  max-width: 40rem;
+  margin: var(--шаг-7) auto;
+  padding: var(--шаг-5);
+  border: 1px solid var(--граница);
+  border-radius: var(--радиус);
+  background: var(--фон-карточки);
+}
+
+/* ---------------------------------------------------------------- Шапка */
+
+.шапка {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--шаг-5);
+  padding: var(--шаг-3) var(--шаг-5);
+  border-bottom: 1px solid var(--граница);
+  background: color-mix(in srgb, var(--фон) 85%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+}
+
+.шапка__марка {
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  font-size: 17px;
+  color: var(--текст);
+  text-decoration: none;
+}
+
+.шапка__навигация {
+  display: flex;
+  align-items: center;
+  gap: var(--шаг-2);
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------- Разметка */
+
+.полоса {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: var(--шаг-6) var(--шаг-4) var(--шаг-7);
+}
+
+.заголовок {
+  margin: 0 0 var(--шаг-5);
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+.подпись {
+  color: var(--текст-тусклый);
+  font-size: 13px;
+}
+
+/* -------------------------------------------------------------- Карточки */
+
+.карточка {
+  padding: var(--шаг-5);
+  border: 1px solid var(--граница);
+  border-radius: var(--радиус);
+  background: var(--фон-карточки);
+  box-shadow: var(--тень-1);
+}
+
+.лента {
+  display: flex;
+  flex-direction: column;
+  gap: var(--шаг-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.пост__шапка {
+  display: flex;
+  align-items: baseline;
+  gap: var(--шаг-2);
+  margin-bottom: var(--шаг-2);
+}
+
+.пост__автор {
+  font-weight: 600;
+  color: var(--текст);
+  text-decoration: none;
+}
+
+.пост__автор:hover {
+  text-decoration: underline;
+}
+
+.пост__тело {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------- Кнопки */
+
+.кнопка {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--шаг-2);
+  min-height: 36px;
+  padding: 0 var(--шаг-4);
+  border: 1px solid transparent;
+  border-radius: var(--радиус-малый);
+  background: var(--акцент);
+  color: var(--акцент-текст);
+  font: inherit;
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    transform 60ms ease;
+}
+
+.кнопка:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.кнопка:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.кнопка:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.кнопка--тихая {
+  background: transparent;
+  border-color: var(--граница);
+  color: var(--текст);
+}
+
+.кнопка--опасная {
+  background: transparent;
+  border-color: var(--граница);
+  color: var(--опасность);
+}
+
+/* Обводка фокуса общая и заметная. Убирать её ради вида — значит делать
+   страницу непроходимой с клавиатуры. */
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--акцент);
+  outline-offset: 2px;
+  border-radius: var(--радиус-малый);
+}
+
+/* ----------------------------------------------------------------- Поля */
+
+.поле {
+  display: flex;
+  flex-direction: column;
+  gap: var(--шаг-1);
+  margin-bottom: var(--шаг-4);
+}
+
+.поле__подпись {
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--текст-тусклый);
+}
+
+.поле__ввод,
+.поле__текст {
+  width: 100%;
+  padding: var(--шаг-3);
+  border: 1px solid var(--граница);
+  border-radius: var(--радиус-малый);
+  background: var(--фон-карточки);
+  color: var(--текст);
+  font: inherit;
+}
+
+.поле__текст {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.поле__ввод::placeholder,
+.поле__текст::placeholder {
+  color: var(--текст-тусклый);
+}
+
+/* --------------------------------------------------------------- Отказы */
+
+.отказ {
+  display: flex;
+  gap: var(--шаг-2);
+  padding: var(--шаг-3) var(--шаг-4);
+  margin-bottom: var(--шаг-4);
+  border: 1px solid color-mix(in srgb, var(--опасность) 35%, var(--граница));
+  border-radius: var(--радиус-малый);
+  background: color-mix(in srgb, var(--опасность) 8%, transparent);
+  color: var(--текст);
+}
+
+.отказ__код {
+  font-family: var(--шрифт-моно);
+  font-size: 12px;
+  color: var(--текст-тусклый);
+}
+
+/* --------------------------------------------------------------- Пустое */
+
+.пусто {
+  padding: var(--шаг-7) var(--шаг-5);
+  text-align: center;
+  color: var(--текст-тусклый);
+}
+
+/* ------------------------------------------------------------ Состояние */
+
+.метка-потока {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--шаг-2);
+  font-size: 12px;
+  color: var(--текст-тусклый);
+}
+
+.метка-потока::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--текст-тусклый);
+}
+
+.метка-потока--живая::before {
+  background: var(--успех);
+}
+
+/* Анимации выключаются, если так попросили в системе. Движение —
+   не украшение для того, кому оно вредит. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
