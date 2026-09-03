@@ -4,6 +4,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,6 +29,17 @@ import java.time.Instant;
  * <p>Истёкшая сессия НЕ УДАЛЯЕТСЯ при проверке. Удаление на чтении
  * превращает безобидный запрос в запись, а под нагрузкой — в запись на
  * каждый запрос. Уборка — отдельная операция.
+ *
+ * <p><b>В БАЗЕ ЛЕЖИТ ОТПЕЧАТОК, А НЕ ТОКЕН.</b> Раньше лежал сам токен и
+ * служил первичным ключом: утечка дампа означала угон всех живых сессий
+ * — без подбора, без следов и без возможности заметить. Теперь хранится
+ * SHA-256; предъявленный токен хэшируется и ищется по отпечатку.
+ *
+ * <p>SHA-256, а не bcrypt, и разница принципиальная. Пароль человек
+ * выбирает сам, он угадываем, и потому хэшируется нарочито медленно.
+ * Токен выдаёт {@link Tokens SecureRandom}, в нём 256 бит энтропии, и
+ * перебирать его некому: быстрый хэш достаточен. Медленный стоил бы
+ * сотни миллисекунд на КАЖДЫЙ запрос — сессия проверяется всегда.
  */
 public final class SessionStore {
 
@@ -36,14 +50,14 @@ public final class SessionStore {
     }
 
     /** Выдать сессию. Токен возвращается вызывающему и больше нигде не
-     *  появляется: в лог он попасть не должен. */
+     *  появляется: ни в базе, ни в логе. */
     public static String open(Connection c, String userId, Instant now)
             throws SQLException {
         String token = Tokens.next();
         try (PreparedStatement ps = c.prepareStatement(
-                "INSERT INTO sessions (token, user_id, created_at, expires_at,"
-                        + " version) VALUES (?, ?, ?, ?, 0)")) {
-            ps.setString(1, token);
+                "INSERT INTO sessions (token_hash, user_id, created_at,"
+                        + " expires_at, version) VALUES (?, ?, ?, ?, 0)")) {
+            ps.setString(1, fingerprint(token));
             ps.setString(2, userId);
             ps.setTimestamp(3, Timestamp.from(now));
             ps.setTimestamp(4, Timestamp.from(now.plus(TTL)));
@@ -66,8 +80,8 @@ public final class SessionStore {
         }
         try (PreparedStatement ps = c.prepareStatement(
                 "SELECT user_id FROM sessions"
-                        + " WHERE token = ? AND expires_at > ?")) {
-            ps.setString(1, token);
+                        + " WHERE token_hash = ? AND expires_at > ?")) {
+            ps.setString(1, fingerprint(token));
             ps.setTimestamp(2, Timestamp.from(now));
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getString(1) : null;
@@ -77,10 +91,44 @@ public final class SessionStore {
 
     /** Отозвать сессию: выход из системы. */
     public static boolean revoke(Connection c, String token) throws SQLException {
+        if (token == null || token.isEmpty()) {
+            return false;
+        }
         try (PreparedStatement ps = c.prepareStatement(
-                "DELETE FROM sessions WHERE token = ?")) {
-            ps.setString(1, token);
+                "DELETE FROM sessions WHERE token_hash = ?")) {
+            ps.setString(1, fingerprint(token));
             return ps.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * Отпечаток токена: то, что попадает в базу.
+     *
+     * <p>Шестнадцатеричная запись, а не base64: колонка объявлена
+     * {@code CHARACTER SET ASCII}, а шестьдесят четыре знака hex ложатся
+     * в её ширину ровно и без вопросов о регистре и о символах,
+     * требующих экранирования.
+     *
+     * <p>Соли нет намеренно. Соль защищает от радужных таблиц, то есть
+     * от заранее посчитанного перебора; перебирать 256 бит случайности
+     * нечем и незачем, а соль потребовала бы читать строку прежде, чем
+     * искать её, — то есть искать по чему-то другому.
+     */
+    static String fingerprint(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte b : bytes) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 обязателен для всякой реализации Java. Отсутствие
+            // означает сломанную среду, а не случай, который стоит
+            // обрабатывать.
+            throw new IllegalStateException("в этой Java нет SHA-256", e);
         }
     }
 

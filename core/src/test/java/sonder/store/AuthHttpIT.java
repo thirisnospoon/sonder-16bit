@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -247,13 +248,58 @@ class AuthHttpIT {
         String token = sessionOf(login("andrey", "тайна"));
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT user_id FROM sessions WHERE token = ?")) {
-            ps.setString(1, token);
+                     "SELECT user_id FROM sessions WHERE token_hash = ?")) {
+            ps.setString(1, sha256hex(token));
             try (java.sql.ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "сессии нет в базе");
                 assertEquals("u-1", rs.getString(1));
             }
         }
+    }
+
+    /**
+     * САМОГО ТОКЕНА В БАЗЕ НЕТ.
+     *
+     * <p>До хэширования он лежал там как есть и служил первичным ключом:
+     * утечка дампа означала угон всех живых сессий — без подбора, без
+     * следов и без возможности заметить. Записано это было в
+     * THREAT-MODEL.md как самый дорогой из незакрытых долгов.
+     *
+     * <p>Проверка ищет токен по ВСЕЙ колонке, а не сверяет отпечаток:
+     * сверка отпечатка подтверждала бы, что мы посчитали то же, что и
+     * код, — то есть повторяла бы его вычисление. Вопрос здесь другой:
+     * можно ли, получив дамп, найти в нём годную куку.
+     */
+    @Test
+    @DisplayName("в базе лежит отпечаток, а самого токена нет нигде")
+    void tokenIsNotStored() throws SQLException {
+        String token = sessionOf(login("andrey", "тайна"));
+        assertNotNull(token, "вход не выдал токена");
+
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT token_hash FROM sessions");
+             java.sql.ResultSet rs = ps.executeQuery()) {
+            int строк = 0;
+            while (rs.next()) {
+                строк++;
+                String хранимое = rs.getString(1);
+                assertNotEquals(token, хранимое,
+                        "токен лежит в базе как есть: дамп базы — это все "
+                                + "живые сессии");
+                assertEquals(64, хранимое.length(),
+                        "в колонке не отпечаток SHA-256: " + хранимое);
+            }
+            assertEquals(1, строк, "ожидалась ровно одна сессия");
+        }
+
+        // И отпечаток НЕ ГОДИТСЯ как кука: подставив его, войти нельзя.
+        // Иначе хэширование сдвигало бы секрет, а не убирало его.
+        ResponseEntity<Map> подделка = http.exchange(
+                "/auth/me", HttpMethod.GET,
+                withToken(sha256hex(token)), Map.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, подделка.getStatusCode(),
+                "отпечаток принят как токен — секрет просто переехал");
     }
 
     @Test
@@ -366,6 +412,28 @@ class AuthHttpIT {
             assertEquals(HttpStatus.UNAUTHORIZED,
                     login("andrey", "снова не тот " + i).getStatusCode(),
                     "счёт не обнулился после успешного входа");
+        }
+    }
+
+    /**
+     * SHA-256 в шестнадцатеричной записи, посчитанный ЗДЕСЬ.
+     *
+     * <p>Намеренно не вызывается метод оболочки: проверка, сверяющая
+     * вычисление с ним же, подтверждает лишь, что код равен самому себе.
+     * Независимая реализация отвечает на настоящий вопрос — лежит ли в
+     * базе именно отпечаток предъявленного токена.
+     */
+    private static String sha256hex(String value) {
+        try {
+            byte[] bytes = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : bytes) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("в этой Java нет SHA-256", e);
         }
     }
 
