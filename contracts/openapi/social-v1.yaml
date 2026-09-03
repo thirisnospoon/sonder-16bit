@@ -17,12 +17,34 @@ info:
   version: "1.0.0"
   description: |
     Мини-соцсеть. Чтение обслуживается денормализованными проекциями,
-    запись проходит через доменное ядро и ограничена примерно десятью
-    операциями в секунду — это измеренный потолок последовательной линии,
-    а не оценка.
+    запись проходит через доменное ядро за последовательной линией и
+    потому ограничена: измеренный потолок — 21,5 команды в секунду без
+    отказов, дальше система отвечает DECIDER_UNAVAILABLE. Чтение к ядру
+    не ходит и держит на порядок больше. Числа и условия замера —
+    docs/BENCHMARK.md.
+
+    ДОСТУП. Всё, кроме входа, выхода и регистрации, требует сессии:
+    личная лента, чужой профиль и отдельный пост открыты только своим.
+    Отсутствие сессии — это 401 SESSION_INVALID, и он объявлен у каждой
+    закрытой операции наравне с прочими ответами.
 
 servers:
   - url: /api
+
+# ДОСТУП ОБЪЯВЛЯЕТСЯ ЗДЕСЬ, а не подразумевается.
+#
+# Оболочка отвечает гостю 401 на всё, кроме входа, выхода и регистрации,
+# — и делала это, пока контракт о доступе МОЛЧАЛ вовсе: ни схемы, ни 401
+# в ответах. Молчание контракта означает, что клиент, порождённый по
+# нему, не знает, какие операции требуют сессии, и узнаёт это отказом.
+# Так и вышло: страница спрашивала личную ленту у гостя и рисовала ему
+# отказ на первом экране.
+#
+# Требование стоит по умолчанию на ВСЕ операции. Открытые перечисляют
+# `security: []` каждая у себя: забыть закрыть опаснее, чем забыть
+# открыть — первое тихо пускает чужого, второе громко не пускает своего.
+security:
+  - sessionCookie: []
 
 tags:
   - name: auth
@@ -46,6 +68,8 @@ paths:
         Сессия выдаётся кукой HttpOnly; Secure; SameSite=Strict.
         Токенов в localStorage нет: их читает любой скрипт на странице.
       operationId: login
+      # Вход — сам способ обзавестись сессией.
+      security: []
       requestBody:
         required: true
         content:
@@ -61,6 +85,8 @@ paths:
       tags: [auth]
       summary: Выход
       operationId: logout
+      # Выход идемпотентен: гостю нечего снимать, и говорить ему об этом отказом незачем.
+      security: []
       responses:
         "204": { description: Сессия отозвана }
 
@@ -83,6 +109,8 @@ paths:
       summary: Регистрация
       description: Команда ядру RegisterUser. Уникальность ника решает ядро.
       operationId: register
+      # Регистрация: сессии у будущего пользователя ещё нет по определению.
+      security: []
       requestBody:
         required: true
         content:
@@ -111,6 +139,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/UserProfile" }
         "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /users/{nick}/follow:
     put:
@@ -125,6 +154,7 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
     delete:
       tags: [social]
       summary: Отписаться
@@ -134,6 +164,7 @@ paths:
       responses:
         "204": { description: Подписки нет }
         "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /feed:
     get:
@@ -152,6 +183,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FeedPage" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /posts:
     post:
@@ -176,6 +208,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /posts/{postId}:
     get:
@@ -191,6 +224,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Post" }
         "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
     delete:
       tags: [posts]
       summary: Удалить пост
@@ -202,6 +236,7 @@ paths:
         "204": { description: Поста нет }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /admin/users/{nick}/ban:
     post:
@@ -223,6 +258,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /events:
     get:
@@ -239,8 +275,18 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
 
 components:
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sonder_session
+      description: |
+        Сессия в куке HttpOnly; Secure; SameSite=Strict. Токенов в
+        localStorage нет: их читает любой скрипт на странице.
 
   parameters:
     Nick:
