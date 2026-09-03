@@ -1,0 +1,37 @@
+{
+  // Строгость включена вся, и это не педантизм: реактивный слой пишется
+  // один раз, а ошибки в нём видны пользователю сразу — в отличие от
+  // ошибок в глубине DOS-ноды (ADR-0012).
+  "compilerOptions": {
+    "target": "ES2022",
+    // node16, а не bundler: сборщика в проекте нет и не будет, модули
+    // грузит сам браузер и сам Node. Отсюда же расширение .js в
+    // импортах — так их видит рантайм, а не компилятор.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    "rootDir": "src",
+    "outDir": "build",
+    "sourceMap": true,
+    "declaration": true,
+    "composite": true,
+    "tsBuildInfoFile": "build/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"]
+}

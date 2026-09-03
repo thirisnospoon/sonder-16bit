@@ -30,3 +30,6 @@ dist/
 # сборочные каталоги dosnode
 /dosnode/build/out/
 target/
+
+# вывод сборки фронта: порождается из web/src, в версии не нужен
+/web/build/
