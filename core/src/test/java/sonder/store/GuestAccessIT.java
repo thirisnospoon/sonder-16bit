@@ -250,6 +250,55 @@ class GuestAccessIT {
     }
 
     /**
+     * ВСЯКИЙ отказ приходит в конверте, объявленном контрактом.
+     *
+     * <p>Обработчики отвечают через {@code RestErrors} и выглядят
+     * правильно — а всё, что до них не дошло, падало в стандартную
+     * страницу Spring с полями {@code timestamp/status/error/path}.
+     * Клиент разбирает {@code ApiError} с {@code code} и
+     * {@code traceId} и спотыкается именно там, где причину понять
+     * нужнее всего.
+     *
+     * <p>Проверяются оба пути отказа: тот, что проходит через
+     * обработчик (тело не того вида), и тот, что до обработчика не
+     * доходит вовсе (адреса нет). Первый ловит совет по исключениям,
+     * второй — подмена страницы ошибок, и одного мало.
+     */
+    @Test
+    @DisplayName("отказ приходит конвертом контракта, а не страницей Spring")
+    void отказВсегдаПоКонтракту() {
+        HttpHeaders заголовки = new HttpHeaders();
+        заголовки.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<String> нетАдреса = http.exchange(
+                "/нет-такого-адреса", HttpMethod.GET,
+                new HttpEntity<>(null, заголовки), String.class);
+        assertEquals(404, нетАдреса.getStatusCodeValue());
+        конверт(нетАдреса, "RESOURCE_NOT_FOUND", "несуществующий адрес");
+
+        ResponseEntity<String> кривоеТело = http.exchange(
+                "/auth/login", HttpMethod.POST,
+                new HttpEntity<>("{это не json", заголовки), String.class);
+        assertEquals(400, кривоеТело.getStatusCodeValue());
+        конверт(кривоеТело, "MALFORMED_REQUEST", "тело не того вида");
+    }
+
+    /** Тело ответа — объявленный ApiError, а не что-то похожее. */
+    private static void конверт(ResponseEntity<String> ответ, String код,
+                                String случай) {
+        String тело = ответ.getBody();
+        assertTrue(тело != null && тело.contains("\"code\":\"" + код + "\""),
+                случай + ": в ответе нет объявленного кода " + код
+                        + ". Тело: " + тело);
+        assertTrue(тело.contains("\"traceId\""),
+                случай + ": в ответе нет traceId, и найти его в логе нечем. "
+                        + "Тело: " + тело);
+        assertFalse(тело.contains("\"timestamp\"") && тело.contains("\"path\""),
+                случай + ": это страница ошибки Spring, а не конверт "
+                        + "контракта. Тело: " + тело);
+    }
+
+    /**
      * Отказ по доступу наступает РАНЬШЕ поиска.
      *
      * <p>Иначе система отвечает гостю «нет такого поста» — и этим
