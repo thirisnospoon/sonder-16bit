@@ -177,6 +177,13 @@ type
     nonce: LongInt;
     fibersInUse: LongInt;
     arenaHighMark: LongInt;
+    arenaCapacity: LongInt;
+    commandsServed: LongInt;
+    commandsRefused: LongInt;
+    commandsMalformed: LongInt;
+    lineErrors: LongInt;
+    rxBytes: LongInt;
+    txBytes: LongInt;
   end;
 
   TDomainEventNode = record

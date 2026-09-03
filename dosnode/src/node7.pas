@@ -81,10 +81,19 @@ var
     синхронно внутри MuxFeedByte, поэтому одной переменной довольно. }
   Cur: Byte;
 
-  { Метрики ноды. Отвечаем ими на пинг, а не выдумываем нули. }
-  Served:   LongInt;
-  Refused:  LongInt;
+  { Метрики ноды. Отвечаем ими на пинг, а не выдумываем нули.
+
+    ArenaPeak — НАСТОЯЩИЙ пик занятости арены, снятый с той арены,
+    которая только что отработала. Раньше на месте пика уезжало число
+    обслуженных команд: величина правдоподобная, растущая, похожая на
+    пик — и потому неотличимая от него снаружи. Проверка здоровья
+    прочитала бы «1738 из 2048» и решила бы, что нода на грани.
+
+    Метрика, которая врёт, хуже отсутствующей: отсутствующую видно. }
+  Served:    LongInt;
+  Refused:   LongInt;
   Malformed: LongInt;
+  ArenaPeak: Word;
 
 { ------------------------------------------------------------------
   Разбор конверта
@@ -177,19 +186,40 @@ end;
 procedure ReplyPing(Chan: Byte; const Req: TPingRequest);
 var
   W: TSoapWriter;
+  P: TPingResponse;
+  PS: TPortStats;
+  MS: TMuxStats;
 begin
+  PS := PortGetStats;
+  MS := MuxGetStats;
+
+  FillChar(P, SizeOf(P), 0);
+  { Тот же нонс: так спрашивающий отличает свой ответ от чужого, а
+    заодно видит, что круг замкнулся именно на нём. }
+  P.nonce := Req.nonce;
+  P.fibersInUse := MuxActive;
+  { Пик и ёмкость вместе. Пик без ёмкости не говорит ничего: «1900» —
+    это спокойствие при ёмкости 8192 и тревога при 2048. }
+  P.arenaHighMark := ArenaPeak;
+  P.arenaCapacity := ArenaPerChan;
+  P.commandsServed := Served;
+  P.commandsRefused := Refused + MS.Refused;
+  P.commandsMalformed := Malformed;
+  { Ошибки линии и байты — то, чем на самом деле ставится диагноз.
+    Именно они показали разорванные кадры: tx=74 против err=150. Пока
+    их было видно только в NODE7.LOG, снаружи это выглядело как
+    «нода молчит». }
+  P.lineErrors := PS.LineErrs + PS.Overruns;
+  P.rxBytes := PS.RxBytes;
+  P.txBytes := PS.TxBytes;
+
   SoapWriterInit(W, Chan, Sink);
   SoapBeginEnvelope(W);
-  { С пространством имён, как и решение: без него на той стороне не
-    свяжется ни одно поле, и метрики приедут нулями — то есть соврут
-    проверке здоровья ровно так, как если бы их выдумали. }
-  SoapOpenNs(W, 'PingResponse', DeciderNs);
-  { Отвечаем тем же нонсом: так спрашивающий отличает свой ответ от
-    чужого, а заодно видит, что круг замкнулся именно на нём. }
-  SoapElementInt(W, 'nonce', Req.nonce);
-  SoapElementInt(W, 'fibersInUse', MuxActive);
-  SoapElementInt(W, 'arenaHighMark', Served);
-  SoapClose(W, 'PingResponse');
+  { Пишет генератор, а не эти строки. Рукописный писатель ответа — это
+    второй экземпляр контракта: поле, добавленное в WSDL, в него не
+    попадёт вовсе, и узнать об этом будет неоткуда. Так уже вышло с
+    пространством имён — его тут забыли, и метрики приезжали нулями. }
+  WritePingResponse(W, P);
   SoapEndEnvelope(W);
   SoapWriterFlush(W);
 end;
@@ -250,6 +280,11 @@ begin
 
   ReplyDecision(Chan, D);
   Inc(Served);
+  { Пик снимается ПОСЛЕ решения: арена к этому моменту держит и
+    разобранный запрос, и события ответа — то есть всё, что команда
+    вообще занимала. Снятый раньше, он показывал бы половину. }
+  if C^.Arena.HighMark > ArenaPeak then
+    ArenaPeak := C^.Arena.HighMark;
 end;
 
 procedure OnCommand(Chan: Byte; const F: TFrame; First, Last: Boolean); far;

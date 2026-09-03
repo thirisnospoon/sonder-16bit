@@ -174,17 +174,32 @@ begin
   Emit('принято без событий');
 end;
 
-{ Ответ на пинг: другой корень и другие поля. }
+{ Ответ на пинг: другой корень и другие поля.
+
+  Числа взяты РАЗНЫЕ и ненулевые. Одинаковые прошли бы проверку и при
+  писателе, который кладёт всюду одно и то же поле; нулевые — при
+  писателе, который не кладёт ничего, потому что ноль и есть то, что
+  видит связыватель, не нашедший поля. }
 procedure Pong;
+var
+  P: TPingResponse;
 begin
+  FillChar(P, SizeOf(P), 0);
+  P.nonce := 4242;
+  P.fibersInUse := 3;
+  P.arenaHighMark := 1024;
+  P.arenaCapacity := 2048;
+  P.commandsServed := 17;
+  P.commandsRefused := 2;
+  P.commandsMalformed := 1;
+  P.lineErrors := 5;
+  P.rxBytes := 90123;
+  P.txBytes := 45061;
+
   StartOne;
   SoapWriterInit(W, 5, Collect);
   SoapBeginEnvelope(W);
-  SoapOpenNs(W, 'PingResponse', DeciderNs);
-  SoapElementInt(W, 'nonce', 4242);
-  SoapElementInt(W, 'fibersInUse', 3);
-  SoapElementInt(W, 'arenaHighMark', 1024);
-  SoapClose(W, 'PingResponse');
+  WritePingResponse(W, P);
   SoapEndEnvelope(W);
   SoapWriterFlush(W);
   Emit('пинг');

@@ -324,12 +324,25 @@
         </xs:complexType>
       </xs:element>
 
+      <!-- Метрики ноды. Все до одной берутся из живых счётчиков; ни
+           одна не выдумывается и не подставляется вместо другой.
+           arenaHighMark когда-то отвечал числом обслуженных команд, и
+           прочитать это было невозможно: число правдоподобное, растёт,
+           похоже на пик. Поэтому рядом с ним теперь ёмкость — пик без
+           ёмкости не говорит ничего. -->
       <xs:element name="PingResponse">
         <xs:complexType>
           <xs:sequence>
-            <xs:element name="nonce"        type="xs:int"/>
-            <xs:element name="fibersInUse"  type="xs:int"/>
-            <xs:element name="arenaHighMark" type="xs:int"/>
+            <xs:element name="nonce"             type="xs:int"/>
+            <xs:element name="fibersInUse"       type="xs:int"/>
+            <xs:element name="arenaHighMark"     type="xs:int"/>
+            <xs:element name="arenaCapacity"     type="xs:int"/>
+            <xs:element name="commandsServed"    type="xs:int"/>
+            <xs:element name="commandsRefused"   type="xs:int"/>
+            <xs:element name="commandsMalformed" type="xs:int"/>
+            <xs:element name="lineErrors"        type="xs:int"/>
+            <xs:element name="rxBytes"           type="xs:int"/>
+            <xs:element name="txBytes"           type="xs:int"/>
           </xs:sequence>
         </xs:complexType>
       </xs:element>

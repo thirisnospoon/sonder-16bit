@@ -243,11 +243,12 @@ class ReplyGoldenTest {
     }
 
     @Test
-    @DisplayName("ответ на пинг несёт метрики ноды, а не нули")
+    @DisplayName("ответ на пинг несёт все метрики ноды, а не нули")
     void pongCarriesMetrics() throws IOException {
         // Третий дефект: пинг писался без пространства имён, и метрики
-        // приходили нулями. Ноль — законное значение счётчика, поэтому
-        // эталон намеренно взят с ненулевыми: иначе проверке нечего сверять.
+        // приходили нулями. Ноль — законное значение счётчика, поэтому в
+        // эталоне все значения ненулевые И РАЗНЫЕ: одинаковые прошли бы
+        // и при писателе, который кладёт всюду одно и то же поле.
         PingResponse p = Envelopes.unwrap(
                 PingResponse.class, goldenReplies().get(PONG));
 
@@ -255,6 +256,38 @@ class ReplyGoldenTest {
         assertEquals(4242, p.getNonce(),
                 "нонс не прочитался: ответ не связать с вызовом");
         assertEquals(3, p.getFibersInUse());
+        // Пик и ёмкость: пик без ёмкости не говорит ничего, и раньше
+        // на месте пика уезжало число обслуженных команд.
         assertEquals(1024, p.getArenaHighMark());
+        assertEquals(2048, p.getArenaCapacity());
+        assertEquals(17, p.getCommandsServed());
+        assertEquals(2, p.getCommandsRefused());
+        assertEquals(1, p.getCommandsMalformed());
+        assertEquals(5, p.getLineErrors());
+        assertEquals(90123, p.getRxBytes());
+        assertEquals(45061, p.getTxBytes());
     }
+
+    @Test
+    @DisplayName("у пинга сверены все поля, объявленные контрактом")
+    void pongCheckedFieldByField() throws Exception {
+        // Проверка выше перечисляет поля руками, и поле, добавленное в
+        // контракт, в неё не попадёт: она останется зелёной, сверяя
+        // прежние девять из десяти. Здесь число полей берётся у самого
+        // ответа — и расходится с числом сверенных.
+        int declared = 0;
+        for (java.lang.reflect.Method m : PingResponse.class.getMethods()) {
+            if (m.getName().startsWith("get") && m.getParameterCount() == 0
+                    && !"getClass".equals(m.getName())) {
+                declared++;
+            }
+        }
+        assertEquals(CHECKED_PONG_FIELDS, declared,
+                "у PingResponse изменился состав полей: сверьте новое поле "
+                        + "в pongCarriesMetrics и поправьте это число. "
+                        + "Молча оставленное поле уехало бы непроверенным");
+    }
+
+    /** Сколько полей пинга сверяет {@link #pongCarriesMetrics()}. */
+    private static final int CHECKED_PONG_FIELDS = 10;
 }

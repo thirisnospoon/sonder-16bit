@@ -70,6 +70,13 @@ procedure WriteDecision(var W: TSoapWriter;
                         const ResponseName: string;
                         const D: TDecision);
 
+{ Запись прочих ответов. Каждый со своим набором полей,
+  поэтому по писателю на ответ — но пишет их всё равно
+  генератор: рукописный писатель это второй экземпляр
+  контракта, и расходится он молча. }
+procedure WritePingResponse(var W: TSoapWriter;
+                        const P: TPingResponse);
+
 implementation
 
 function ParseRole(const S: TStr; var V: TRole): Boolean;
@@ -873,6 +880,22 @@ begin
     Node := Node^.Next;
   end;
   SoapClose(W, ResponseName);
+end;
+
+procedure WritePingResponse(var W: TSoapWriter; const P: TPingResponse);
+begin
+  SoapOpenNs(W, 'PingResponse', 'urn:sonder:decider:v1');
+  SoapElementInt(W, 'nonce', P.nonce);
+  SoapElementInt(W, 'fibersInUse', P.fibersInUse);
+  SoapElementInt(W, 'arenaHighMark', P.arenaHighMark);
+  SoapElementInt(W, 'arenaCapacity', P.arenaCapacity);
+  SoapElementInt(W, 'commandsServed', P.commandsServed);
+  SoapElementInt(W, 'commandsRefused', P.commandsRefused);
+  SoapElementInt(W, 'commandsMalformed', P.commandsMalformed);
+  SoapElementInt(W, 'lineErrors', P.lineErrors);
+  SoapElementInt(W, 'rxBytes', P.rxBytes);
+  SoapElementInt(W, 'txBytes', P.txBytes);
+  SoapClose(W, 'PingResponse');
 end;
 
 end.

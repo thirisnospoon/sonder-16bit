@@ -434,6 +434,60 @@ def decision_writer(model: Model) -> list[str]:
     return o
 
 
+def flat_response_writers(model: Model) -> list[tuple[str, list[str]]]:
+    """Писатели для плоских ответов: всё, что не TDecision.
+
+    Плоский — значит без повторяемых полей и без вложенных записей.
+    Такой ответ пишется одним прямым перечислением, и держать его в
+    ноде руками незачем: добавленное в контракт поле туда не попало бы
+    и потерялось бы молча.
+    """
+    by_name = dict(model.records)
+    out: list[tuple[str, list[str]]] = []
+
+    for name, fields in model.records:
+        if not name.endswith("Response") or name == "TDecision":
+            continue
+        nested = [f for f in fields
+                  if f["repeated"] or f["type"] in by_name]
+        if nested:
+            # Не молчим: непокрытый ответ значит, что нода снова начнёт
+            # писать его руками, а генератор сделает вид, что всё учтено.
+            raise SystemExit(
+                "ответ " + name + " не плоский, а писателя для составных "
+                "ответов генератор не умеет: поля "
+                + ", ".join(f["name"] for f in nested))
+        out.append((name, fields))
+    return out
+
+
+def response_writer(name: str, fields: list[dict]) -> list[str]:
+    element = name[1:]            # TPingResponse -> PingResponse
+    proc = "Write" + element
+
+    def one(acc: str, xsd: str, ftype: str) -> list[str]:
+        if ftype == "Boolean":
+            return [f"  SoapElementBool(W, '{xsd}', {acc});"]
+        if ftype == "TStr":
+            return [f"  SoapElement(W, '{xsd}', {acc});"]
+        if ftype in ("LongInt", "Integer", "Int64"):
+            return [f"  SoapElementInt(W, '{xsd}', {acc});"]
+        raise SystemExit("тип " + ftype + " в ответе " + name
+                         + " генератор писать не умеет")
+
+    o = [f"procedure {proc}(var W: TSoapWriter; const P: {name});", "begin"]
+    # Корень с пространством имён — по той же причине, что и у решения:
+    # без него связыватель не находит ни одного поля, и метрики приезжают
+    # нулями, то есть врут проверке здоровья.
+    o.append(f"  SoapOpenNs(W, '{element}', '{TARGET_NS}');")
+    for f in fields:
+        o.extend(one(f"P.{f['name']}", f["xsd_name"], f["type"]))
+    o.append(f"  SoapClose(W, '{element}');")
+    o.append("end;")
+    o.append("")
+    return o
+
+
 def emit_server(model: Model) -> str:
     by_name = dict(model.records)
     requests = [n for n, _ in model.records if n.endswith("Request")]
@@ -466,6 +520,16 @@ def emit_server(model: Model) -> str:
     o.append("                        const ResponseName: string;")
     o.append("                        const D: TDecision);")
     o.append("")
+    flat = flat_response_writers(model)
+    if flat:
+        o.append("{ Запись прочих ответов. Каждый со своим набором полей,")
+        o.append("  поэтому по писателю на ответ — но пишет их всё равно")
+        o.append("  генератор: рукописный писатель это второй экземпляр")
+        o.append("  контракта, и расходится он молча. }")
+        for name, _ in flat:
+            o.append(f"procedure Write{name[1:]}(var W: TSoapWriter;")
+            o.append(f"                        const P: {name});")
+        o.append("")
     o.append("implementation")
     o.append("")
 
@@ -525,6 +589,8 @@ def emit_server(model: Model) -> str:
         o.append("")
 
     o.extend(decision_writer(model))
+    for name, fields in flat_response_writers(model):
+        o.extend(response_writer(name, fields))
     o.append("end.")
     return "\n".join(o) + "\n"
 
