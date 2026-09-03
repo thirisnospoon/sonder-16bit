@@ -497,6 +497,18 @@ cmd_lag() {
   bash ops/ci/lag.sh || return 1
 }
 
+# Выдаёт ли время ответа существование ника.
+#
+# THREAT-MODEL.md называл это средством, обеспеченным конструкцией, но
+# не измеренным. Ищется не тонкая разница, а обвал: без фиктивного хэша
+# несуществующий ник перестаёт платить за bcrypt и отвечает вшестеро
+# быстрее.
+cmd_timing() {
+  need_docker
+  step "время ответа входа"
+  bash ops/ci/timing.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -665,6 +677,7 @@ Sonder — цели
   trace                сквозной след: заголовок, оболочка, NODE-7, outbox
   chaos                отказ базы и оболочки: возвращается ли система сама
   lag                  лаг read-model: от «принято» до «видно в ленте»
+  timing               выдаёт ли время ответа существование ника
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -698,6 +711,7 @@ case "${1:-help}" in
   trace)              cmd_trace ;;
   chaos)              cmd_chaos ;;
   lag)                cmd_lag ;;
+  timing)             cmd_timing ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
