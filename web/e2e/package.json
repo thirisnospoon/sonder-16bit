@@ -1,0 +1,13 @@
+{
+  "name": "sonder-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Сценарии в настоящем браузере против поднятой системы",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.9.1",
+    "@playwright/test": "1.45.0"
+  }
+}

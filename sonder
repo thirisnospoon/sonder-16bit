@@ -329,6 +329,14 @@ cmd_down() {
   docker compose down "$@"
 }
 
+cmd_e2e_web() {
+  need_docker
+  step "сценарии в браузере"
+  # Против ПОДНЯТОЙ системы: ./sonder up сначала. Поднимать её отсюда
+  # значило бы прятать в проверке минуты сборки.
+  bash ops/ci/e2e-web.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -460,6 +468,7 @@ Sonder — цели
   java-it              интеграционные тесты оболочки против Firebird
   web [цель]           сборка и тесты фронта; lock — пересчёт замка зависимостей
   up                   поднять систему целиком: база, оболочка, NODE-7, фронт
+  e2e-web              сценарии в браузере против поднятой системы
   down                 остановить и убрать
   clean                удалить сборочные артефакты
 
@@ -491,6 +500,7 @@ case "${1:-help}" in
   java-it)            need_docker; cmd_java_it ;;
   web)                shift; cmd_web "$@" ;;
   up)                 shift; cmd_up "$@" ;;
+  e2e-web)            cmd_e2e_web ;;
   down)               shift; cmd_down "$@" ;;
   clean)              cmd_clean ;;
   help|-h|--help)     cmd_help ;;

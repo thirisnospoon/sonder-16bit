@@ -55,6 +55,21 @@ function segments(path: string): string[] {
   return path.split('/').filter((part) => part !== '')
 }
 
+/**
+ * Раскодировать часть пути.
+ *
+ * Испорченную последовательность процентов оставляем как есть: она не
+ * совпадёт ни с одним образцом, и это правильный исход. Отказ здесь
+ * уронил бы страницу от одного лишь кривого адреса в строке браузера.
+ */
+function decode(part: string): string {
+  try {
+    return decodeURIComponent(part)
+  } catch {
+    return part
+  }
+}
+
 function matchOne<N extends string>(
   compiled: Compiled<N>,
   parts: readonly string[],
@@ -73,10 +88,16 @@ function matchOne<N extends string>(
       if (actual === '') {
         return null
       }
-      params[expected.slice(1)] = decodeURIComponent(actual)
+      params[expected.slice(1)] = decode(actual)
       continue
     }
-    if (expected !== actual) {
+    // ПОСТОЯННАЯ ЧАСТЬ ТОЖЕ РАСКОДИРУЕТСЯ, и это не мелочь. Браузер
+    // отдаёт `location.pathname` в процентной кодировке, а образец
+    // написан буквами: `/вход` приходит как
+    // `/%D0%B2%D1%85%D0%BE%D0%B4` и не совпадает ни с чем. Всякий
+    // маршрут с кириллицей не работал бы никогда — причём молча,
+    // показывая страницу «не найдено».
+    if (decode(expected) !== decode(actual)) {
       return null
     }
   }

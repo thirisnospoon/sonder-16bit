@@ -74,6 +74,38 @@ test('переменная в кодировке процентов раскод
   assert.equal(router.current.value.params['nick'], 'андрей')
 })
 
+test('маршрут с кириллицей совпадает и в процентной кодировке', () => {
+  // Браузер отдаёт location.pathname закодированным, а образец написан
+  // буквами. Сравнение посимвольно давало бы «страница не найдена» на
+  // ВСЯКОМ маршруте с кириллицей — молча, без единого следа. Нашла это
+  // проверка в настоящем браузере, а не эта: до неё сравнивать было не
+  // с чем, потому что jsdom подставлял путь как есть.
+  const routes: readonly RouteDef<'вход' | 'нет'>[] = [
+    { name: 'вход', pattern: '/вход' },
+    { name: 'нет', pattern: '/404' },
+  ]
+
+  dom.window.history.replaceState(
+    null,
+    '',
+    '/%D0%B2%D1%85%D0%BE%D0%B4',
+  )
+  assert.equal(createRouter(routes, 'нет').current.value.name, 'вход')
+
+  // И буквами тоже: адрес, набранный руками, обязан работать так же.
+  dom.window.history.replaceState(null, '', '/вход')
+  assert.equal(createRouter(routes, 'нет').current.value.name, 'вход')
+})
+
+test('испорченная процентная последовательность не роняет страницу', () => {
+  // Кривой адрес в строке браузера — обычное дело. Отказ разбора уронил
+  // бы приложение целиком там, где достаточно показать «не найдено».
+  dom.window.history.replaceState(null, '', '/posts/%E0%A4%A')
+  const router = createRouter(ROUTES, 'нет')
+  assert.equal(router.current.value.name, 'пост')
+  assert.equal(router.current.value.params['postId'], '%E0%A4%A')
+})
+
 test('строка запроса разбирается и в путь не попадает', () => {
   dom.window.history.replaceState(null, '', '/?after=p-7&limit=20')
   const router = createRouter(ROUTES, 'нет')
