@@ -128,6 +128,8 @@ cmd_codegen() {
   ensure_dos
   step "эталонные кадры линии"
   run_dos bash ops/ci/gen-frames.sh || return 1
+  step "эталонные ответы ядра"
+  run_dos bash ops/ci/gen-replies.sh || return 1
 }
 
 # Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
