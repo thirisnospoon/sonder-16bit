@@ -8,6 +8,18 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap verify contracts contracts-selftest spikes clean check-eol
-help bootstrap verify contracts contracts-selftest spikes clean check-eol:
+# ЦЕЛИ НЕ ПЕРЕЧИСЛЯЮТСЯ, а прокидываются все подряд. Перечисленные
+# разошлись бы со списком в ./sonder — и разошлись: там тридцать целей,
+# здесь стояло восемь, и `make trace` отвечал «No rule to make target».
+# Тот же класс дефекта, что и список файлов, вписанный в проверку
+# вторым экземпляром.
+#
+# `%::` — правило-catch-all с двумя двоеточиями: оно не считается
+# ошибкой, если цели не соответствует файл, и не пытается ничего
+# пересобирать.
+.PHONY: help
+help:
+	@./sonder help
+
+%::
 	@./sonder $@
