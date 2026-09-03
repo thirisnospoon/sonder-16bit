@@ -485,6 +485,18 @@ cmd_chaos() {
   bash ops/ci/chaos.sh || return 1
 }
 
+# Лаг read-model против цели SLO.
+#
+# ARCHITECTURE.md §12 объявляет «p99 < 1 с», и до этой проверки величина
+# не измерялась ничем: замер дренажа отвечал на соседний вопрос — за
+# сколько разбирается ЗАВАЛ, — а SLO спрашивает про одно событие в
+# спокойной системе.
+cmd_lag() {
+  need_docker
+  step "лаг read-model"
+  bash ops/ci/lag.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -652,6 +664,7 @@ Sonder — цели
   lighthouse           замер Lighthouse: три прогона, медиана, порог 90
   trace                сквозной след: заголовок, оболочка, NODE-7, outbox
   chaos                отказ базы и оболочки: возвращается ли система сама
+  lag                  лаг read-model: от «принято» до «видно в ленте»
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -684,6 +697,7 @@ case "${1:-help}" in
   lighthouse)         cmd_lighthouse ;;
   trace)              cmd_trace ;;
   chaos)              cmd_chaos ;;
+  lag)                cmd_lag ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
