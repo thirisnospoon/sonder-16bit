@@ -217,6 +217,7 @@ cmd_verify() {
   need_docker
   local rc=0
   cmd_check_eol           || rc=1
+  cmd_check_shell         || rc=1
   cmd_contracts           || rc=1
   cmd_contracts_selftest  || rc=1
   cmd_check_drift         || rc=1
@@ -509,6 +510,29 @@ cmd_timing() {
   bash ops/ci/timing.sh || return 1
 }
 
+# Проверка проверок: умеют ли они падать.
+#
+# Дисциплина требует, чтобы у каждой проверки была способность упасть, и
+# до сих пор это подтверждалось разово, вручную, скриптами из временного
+# каталога — то есть терялось сразу после подтверждения. Риск R11
+# говорит, что «быть внимательнее» механикой не является; это она.
+# Имена переменных в shell-скриптах — только латиницей.
+#
+# Кириллица там — не ошибка присваивания, а «command not found»: скрипт
+# продолжает с пустой переменной. Ловушка сработала пять раз, и знание
+# правила не спасло ни разу — спасает только эта проверка.
+cmd_check_shell() {
+  need_docker
+  step "идентификаторы в shell-скриптах"
+  run_py python ops/ci/check-shell.py
+}
+
+cmd_falsify() {
+  need_docker
+  step "проверка проверок"
+  bash ops/ci/falsify/run.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -678,6 +702,8 @@ Sonder — цели
   chaos                отказ базы и оболочки: возвращается ли система сама
   lag                  лаг read-model: от «принято» до «видно в ленте»
   timing               выдаёт ли время ответа существование ника
+  check-shell          имена переменных в shell-скриптах
+  falsify              проверка проверок: умеют ли они падать
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -693,6 +719,7 @@ case "${1:-help}" in
   image-contracts)    need_docker; cmd_image_contracts ;;
   verify)             cmd_verify ;;
   check-eol)          cmd_check_eol ;;
+  check-shell)        need_docker; cmd_check_shell ;;
   contracts)          need_docker; cmd_contracts ;;
   contracts-selftest) need_docker; cmd_contracts_selftest ;;
   codegen)            need_docker; cmd_codegen ;;
@@ -712,6 +739,7 @@ case "${1:-help}" in
   chaos)              cmd_chaos ;;
   lag)                cmd_lag ;;
   timing)             cmd_timing ;;
+  falsify)            cmd_falsify ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
