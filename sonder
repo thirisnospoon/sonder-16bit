@@ -231,6 +231,9 @@ cmd_verify() {
   cmd_check_node          || rc=1
   cmd_check_budgets       || rc=1
   cmd_check_layers        || rc=1
+  # Свод входит в общий прогон: вход порождается, база не нужна, и
+  # пакетная программа ломается так же тихо, как всё остальное.
+  cmd_report_test         || rc=1
   cmd_test                || rc=1
   # Java входит в verify с самого начала. Проверка, охватывающая половину
   # кодовой базы, уже один раз позволила регрессии просидеть несколько
@@ -550,6 +553,16 @@ cmd_report() {
   bash ops/ci/report.sh || return 1
 }
 
+# Свод на эталонных данных: итоги известны заранее.
+#
+# База не нужна — вход порождается. Поэтому проверка быстрая и входит в
+# общий прогон, в отличие от самого свода.
+cmd_report_test() {
+  need_docker
+  step "свод на эталонных данных"
+  bash ops/ci/report-test.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -722,6 +735,7 @@ Sonder — цели
   check-shell          имена переменных в shell-скриптах
   falsify              проверка проверок: умеют ли они падать
   report               ночной свод: выгрузка, пакет на COBOL, отчёт
+  report-test          свод на эталонных данных, итоги известны заранее
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -759,6 +773,7 @@ case "${1:-help}" in
   timing)             cmd_timing ;;
   falsify)            cmd_falsify ;;
   report)             cmd_report ;;
+  report-test)        cmd_report_test ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
