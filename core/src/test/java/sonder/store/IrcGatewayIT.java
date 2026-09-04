@@ -5,9 +5,25 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import sonder.Application;
+import sonder.contract.decider.BanUserRequest;
+import sonder.contract.decider.CreateCommentRequest;
+import sonder.contract.decider.CreatePostRequest;
+import sonder.contract.decider.Decider;
+import sonder.contract.decider.Decision;
+import sonder.contract.decider.DomainEvent;
+import sonder.contract.decider.FollowUserRequest;
+import sonder.contract.decider.PingRequest;
+import sonder.contract.decider.PingResponse;
+import sonder.contract.decider.RegisterUserRequest;
+import sonder.contract.decider.UnfollowUserRequest;
+import sonder.contract.decider.DeletePostRequest;
 import sonder.shell.auth.Passwords;
 import sonder.shell.irc.IrcServer;
 
@@ -49,7 +65,72 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @SpringBootTest(
         classes = Application.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(IrcGatewayIT.FakeCore.class)
 class IrcGatewayIT {
+
+    /**
+     * Подменное ядро.
+     *
+     * <p>Настоящее живёт под DOSBox за последовательной линией, и в
+     * интеграционном прогоне его нет. Подмена отвечает согласием — этого
+     * довольно: проверяется не решение ядра, а то, что команда из IRC
+     * идёт ТЕМ ЖЕ путём, что и команда из REST, и доезжает до базы.
+     *
+     * <p>Реализуется полный интерфейс контракта, а не удобное
+     * подмножество: подмена, умеющая меньше настоящего, однажды скроет
+     * то, чего оболочка не делает.
+     */
+    @TestConfiguration
+    static class FakeCore {
+        @Bean
+        @Primary
+        Decider fakeDecider() {
+            return new Decider() {
+                private Decision accepted(String type) {
+                    Decision d = new Decision();
+                    d.setAccepted(true);
+                    DomainEvent e = new DomainEvent();
+                    e.setType(type);
+                    e.setAggregateId("p-irc");
+                    d.getEvent().add(e);
+                    return d;
+                }
+
+                @Override
+                public Decision createPost(CreatePostRequest r) {
+                    return accepted("post.created");
+                }
+
+                @Override public Decision deletePost(DeletePostRequest r) {
+                    return accepted("post.deleted");
+                }
+
+                @Override public Decision createComment(CreateCommentRequest r) {
+                    return accepted("comment.created");
+                }
+
+                @Override public Decision registerUser(RegisterUserRequest r) {
+                    return accepted("user.registered");
+                }
+
+                @Override public Decision followUser(FollowUserRequest r) {
+                    return accepted("user.followed");
+                }
+
+                @Override public Decision unfollowUser(UnfollowUserRequest r) {
+                    return accepted("user.unfollowed");
+                }
+
+                @Override public Decision banUser(BanUserRequest r) {
+                    return accepted("user.banned");
+                }
+
+                @Override public PingResponse ping(PingRequest r) {
+                    return new PingResponse();
+                }
+            };
+        }
+    }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -183,6 +264,92 @@ class IrcGatewayIT {
             left = sessions();
         }
         assertEquals(0, left, "сессия пережила соединение");
+    }
+
+    private int posts() throws Exception {
+        try (Connection c = dataSource.getConnection();
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM posts")) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private int outbox() throws Exception {
+        try (Connection c = dataSource.getConnection();
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM outbox")) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    /**
+     * Ради этого второй транспорт и заводился.
+     *
+     * <p>Написанное в канал проходит ТОТ ЖЕ путь, что и {@code POST
+     * /api/posts}: загрузка состояния, решение на ядре, сохранение с
+     * оптимистической блокировкой и запись в outbox одной транзакцией.
+     * Собери шлюз свой путь записи — он доказывал бы независимость
+     * домена ровно так же, как два разных приложения доказывают
+     * независимость друг от друга, то есть никак.
+     *
+     * <p>Проверяется поэтому не ответ шлюза, а <b>следы в базе</b>: пост
+     * с тем самым текстом и событие в очереди рядом с ним.
+     */
+    @Test
+    @DisplayName("написанное в канал становится постом и событием в outbox")
+    void messageInChannelBecomesPost() throws Exception {
+        assertEquals(0, posts(), "посты остались от прошлого теста");
+
+        try (Client client = new Client(irc.boundPort())) {
+            client.send("PASS тайна");
+            client.send("NICK andrey");
+            client.send("USER andrey 0 * :Андрей");
+            client.until(" 366 ");
+
+            client.send("PRIVMSG #feed :пост, написанный из ирки");
+
+            // Ответа на успех протокол не предполагает, поэтому ждём не
+            // строку, а след в базе. Опрос с пределом, а не сон на
+            // фиксированное время: сон проверял бы скорость машины.
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (posts() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+        }
+
+        assertEquals(1, posts(), "пост из IRC не доехал до базы");
+        assertEquals(1, outbox(), "событие не легло в очередь вместе с постом");
+
+        try (Connection c = dataSource.getConnection();
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT author_id, body FROM posts")) {
+            assertTrue(rs.next());
+            assertEquals("u-1", rs.getString(1), "пост записан не тому автору");
+            assertEquals("пост, написанный из ирки", rs.getString(2),
+                    "текст доехал не целиком");
+        }
+    }
+
+    /**
+     * Личных сообщений у продукта нет, и проглотить их молча значило бы
+     * показать отправителю доставку, которой не было.
+     */
+    @Test
+    @DisplayName("личное сообщение не становится постом")
+    void privateMessageIsNotAPost() throws Exception {
+        try (Client client = new Client(irc.boundPort())) {
+            client.send("PASS тайна");
+            client.send("NICK andrey");
+            client.send("USER andrey 0 * :Андрей");
+            client.until(" 366 ");
+
+            client.send("PRIVMSG vasya :привет");
+            assertTrue(has(client.until(" 401 "), " 401 "), "не отказано");
+        }
+        assertEquals(0, posts(), "личное сообщение стало постом");
     }
 
     @Test

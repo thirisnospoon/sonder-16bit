@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
+import sonder.contract.decider.Decider;
+
 import javax.sql.DataSource;
 import java.io.IOException;
 
@@ -34,12 +36,13 @@ public class IrcServerConfig {
     @Conditional(PortNamed.class)
     public IrcServer ircServer(
             DataSource dataSource,
+            Decider decider,
             @Value("${sonder.irc.port}") int port,
             @Value("${sonder.irc.max-connections:64}") int maxConnections,
             @Value("${sonder.irc.handshake-timeout-ms:60000}") int handshakeTimeoutMs)
             throws IOException {
-        IrcServer server =
-                new IrcServer(dataSource, port, maxConnections, handshakeTimeoutMs);
+        IrcServer server = new IrcServer(
+                dataSource, decider, port, maxConnections, handshakeTimeoutMs);
         server.start();
         return server;
     }

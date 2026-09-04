@@ -36,6 +36,15 @@ public final class IrcSession {
     /** Имя сервера в числовых ответах. */
     public static final String SERVER = "sonder";
 
+    /**
+     * Единственный канал: лента.
+     *
+     * <p>Канал здесь не комната для разговора, а имя потока: написанное
+     * в него становится ПОСТОМ, а не сообщением соседям. Заводить второй
+     * значило бы обещать то, чего у продукта нет.
+     */
+    public static final String CHANNEL = "#feed";
+
     /** Кто проверяет имя и пароль. Реализация ходит в базу, тест — нет. */
     public interface Authenticator {
         /** Исход попытки входа. */
@@ -69,6 +78,37 @@ public final class IrcSession {
         Result authenticate(String nick, String password);
     }
 
+    /**
+     * Кто на самом деле создаёт пост.
+     *
+     * <p>Реализация идёт тем же путём, что и REST: загрузка состояния,
+     * решение НА ЯДРЕ, сохранение с оптимистической блокировкой и запись
+     * в outbox одной транзакцией. Здесь — только интерфейс, чтобы
+     * разговор проверялся без базы и без линии к ноде.
+     */
+    public interface Poster {
+        /** Исход команды: принято или отказ с кодом из контракта. */
+        final class Result {
+            private final boolean accepted;
+            private final String errorCode;
+
+            public Result(boolean accepted, String errorCode) {
+                this.accepted = accepted;
+                this.errorCode = errorCode;
+            }
+
+            public boolean isAccepted() {
+                return accepted;
+            }
+
+            public String getErrorCode() {
+                return errorCode;
+            }
+        }
+
+        Result post(String userId, String text);
+    }
+
     /** Что отправить клиенту и закрывать ли соединение после отправки. */
     public static final class Reply {
         private final List<String> lines;
@@ -89,6 +129,7 @@ public final class IrcSession {
     }
 
     private final Authenticator authenticator;
+    private final Poster poster;
 
     private String nick;
     private String password;
@@ -97,8 +138,9 @@ public final class IrcSession {
     private String userId;
     private String token;
 
-    public IrcSession(Authenticator authenticator) {
+    public IrcSession(Authenticator authenticator, Poster poster) {
         this.authenticator = authenticator;
+        this.poster = poster;
     }
 
     public boolean isRegistered() {
@@ -182,6 +224,21 @@ public final class IrcSession {
             case "PONG":
                 return new Reply(out, false);
 
+            case "JOIN":
+                if (!registered) {
+                    out.add(numeric(451, ":Сначала регистрация"));
+                    return new Reply(out, false);
+                }
+                if (!CHANNEL.equalsIgnoreCase(line.param(0))) {
+                    out.add(numeric(403, line.param(0) + " :Здесь один канал: " + CHANNEL));
+                    return new Reply(out, false);
+                }
+                join(out);
+                return new Reply(out, false);
+
+            case "PRIVMSG":
+                return privmsg(line, out);
+
             case "QUIT":
                 out.add("ERROR :До свидания");
                 return new Reply(out, true);
@@ -239,14 +296,114 @@ public final class IrcSession {
         }
     }
 
+    /**
+     * Написанное в канал становится ПОСТОМ.
+     *
+     * <p><b>Успех не подтверждается ничем,</b> и это не небрежность:
+     * клиент IRC показывает отправленное сам, а сервер своё же сообщение
+     * обратно не шлёт. Подтверждение выглядело бы вторым сообщением
+     * рядом с первым.
+     *
+     * <p><b>Отказ приходит NOTICE, а не числовым ответом.</b> Числовые
+     * коды протокола описывают беды протокола — нет такого канала, нет
+     * прав; отказ ядра к ним не сводится, и притворяться, что сводится,
+     * значило бы врать клиенту точным кодом.
+     */
+    private Reply privmsg(IrcLine line, List<String> out) {
+        if (!registered) {
+            out.add(numeric(451, ":Сначала регистрация"));
+            return new Reply(out, false);
+        }
+        String target = line.param(0);
+        String text = line.param(1);
+
+        if (target == null) {
+            out.add(numeric(411, ":Не указано, кому"));
+            return new Reply(out, false);
+        }
+        if (text == null || text.isEmpty()) {
+            out.add(numeric(412, ":Пустое сообщение постом не станет"));
+            return new Reply(out, false);
+        }
+        if (!CHANNEL.equalsIgnoreCase(target)) {
+            // Личных сообщений у продукта нет вовсе. Молчаливое
+            // проглатывание выглядело бы как доставка.
+            out.add(numeric(401, target + " :Личных сообщений нет; пишите в " + CHANNEL));
+            return new Reply(out, false);
+        }
+
+        Poster.Result result = poster.post(userId, text);
+        if (!result.isAccepted()) {
+            out.add(notice(refusal(result.getErrorCode())));
+        }
+        return new Reply(out, false);
+    }
+
+    /**
+     * Отказ ядра по-русски.
+     *
+     * <p>Код называется рядом с объяснением: он же приходит в ответах
+     * REST, и человек, видевший его там, узнает здесь то же самое.
+     * Молчаливая замена кода на «что-то пошло не так» лишила бы
+     * возможности сопоставить.
+     */
+    private static String refusal(String code) {
+        String reason;
+        if (code == null) {
+            reason = "команда не принята";
+        } else {
+            switch (code) {
+                case "POST_BODY_EMPTY":
+                    reason = "пустой пост";
+                    break;
+                case "POST_BODY_TOO_LONG":
+                    reason = "пост длиннее предела";
+                    break;
+                case "POST_RATE_EXCEEDED":
+                    reason = "слишком часто, подождите";
+                    break;
+                case "DECIDER_UNAVAILABLE":
+                    reason = "ядро не отвечает, пост не создан";
+                    break;
+                case "SESSION_INVALID":
+                    reason = "сессия истекла, войдите заново";
+                    break;
+                default:
+                    reason = "команда не принята";
+                    break;
+            }
+        }
+        return code == null ? reason : reason + " (" + code + ")";
+    }
+
+    private String notice(String text) {
+        return ":" + SERVER + " NOTICE " + CHANNEL + " :" + text;
+    }
+
+    /**
+     * Вход в канал.
+     *
+     * <p>Делается сразу после приветствия, без просьбы клиента: канал
+     * здесь один, и заставлять набирать JOIN значило бы прятать
+     * единственное, ради чего сюда приходят.
+     */
+    private void join(List<String> out) {
+        out.add(":" + nick + "!" + nick + "@" + SERVER + " JOIN " + CHANNEL);
+        out.add(numeric(332, CHANNEL + " :Лента. Написанное здесь становится постом"));
+        out.add(numeric(353, "= " + CHANNEL + " :" + nick));
+        out.add(numeric(366, CHANNEL + " :Конец списка имён"));
+    }
+
     private void welcome(List<String> out) {
         out.add(numeric(1, ":Добро пожаловать в Sonder, " + nick));
         out.add(numeric(2, ":Оболочка на Java, решения принимает NODE-7 под DOS"));
         out.add(numeric(3, ":Шлюз IRC — второй канал того же конвейера событий"));
         out.add(numeric(4, SERVER + " sonder-1 - -"));
         out.add(numeric(375, ":- " + SERVER + " -"));
-        out.add(numeric(372, ":- Лента приходит сюда же, куда и в браузер."));
+        out.add(numeric(372, ":- Написанное в " + CHANNEL + " становится постом."));
+        out.add(numeric(372, ":- Решение принимает NODE-7, а не этот шлюз."));
         out.add(numeric(376, ":Конец сообщения дня"));
+        join(out);
     }
 
     private String numeric(int code, String rest) {

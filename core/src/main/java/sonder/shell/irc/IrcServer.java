@@ -3,8 +3,13 @@ package sonder.shell.irc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import sonder.contract.ErrorCode;
+import sonder.shell.app.CommandFlow;
+import sonder.shell.app.CreatePostHandler;
+import sonder.shell.app.VersionConflict;
 import sonder.shell.auth.Login;
 import sonder.shell.auth.SessionStore;
+import sonder.contract.decider.Decider;
 import sonder.shell.rest.Trace;
 
 import javax.sql.DataSource;
@@ -52,6 +57,8 @@ public class IrcServer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(IrcServer.class);
 
     private final DataSource dataSource;
+    private final CommandFlow flow;
+    private final Decider decider;
     private final int port;
     private final int maxConnections;
     private final int handshakeTimeoutMs;
@@ -62,9 +69,14 @@ public class IrcServer implements AutoCloseable {
     private volatile Thread acceptor;
     private volatile boolean stopping;
 
-    public IrcServer(DataSource dataSource, int port, int maxConnections,
-                     int handshakeTimeoutMs) {
+    public IrcServer(DataSource dataSource, Decider decider, int port,
+                     int maxConnections, int handshakeTimeoutMs) {
         this.dataSource = dataSource;
+        this.decider = decider;
+        // Тот же поток команды, что у REST: загрузка состояния, решение
+        // на ядре, сохранение с оптимистической блокировкой и запись в
+        // outbox одной транзакцией.
+        this.flow = new CommandFlow(dataSource::getConnection);
         this.port = port;
         this.maxConnections = maxConnections;
         this.handshakeTimeoutMs = handshakeTimeoutMs;
@@ -145,7 +157,7 @@ public class IrcServer implements AutoCloseable {
             // живёт долго по своей природе.
             s.setSoTimeout(handshakeTimeoutMs);
 
-            IrcSession session = new IrcSession(this::authenticate);
+            IrcSession session = new IrcSession(this::authenticate, this::post);
             LineReader reader = new LineReader(in);
 
             while (true) {
@@ -233,6 +245,37 @@ public class IrcServer implements AutoCloseable {
             log.warn("IRC: вход не проверить, база недоступна", e);
             return new IrcSession.Authenticator.Result(
                     IrcSession.Authenticator.Verdict.UNAVAILABLE, null, null);
+        }
+    }
+
+    /**
+     * Создание поста командой из канала.
+     *
+     * <p><b>Тем же путём, что и REST,</b> и это единственное, ради чего
+     * второй транспорт вообще заводился. Собери шлюз свой путь записи —
+     * он доказывал бы, что домен независим от транспорта, ровно так же,
+     * как два разных приложения доказывают независимость друг от друга,
+     * то есть никак.
+     *
+     * <p>Решение принимает НЕ ЭТОТ КОД. Можно ли создать пост, решает
+     * NODE-7 под DOS; здесь остаётся передать ответ клиенту (ADR-0011).
+     */
+    private IrcSession.Poster.Result post(String userId, String text) {
+        String traceId = Trace.current();
+        try {
+            CreatePostHandler handler = new CreatePostHandler(flow, decider);
+            CreatePostHandler.Outcome outcome =
+                    handler.handle(userId, text, traceId, traceId, Instant.now());
+            return new IrcSession.Poster.Result(
+                    outcome.isAccepted(), outcome.getErrorCode());
+        } catch (VersionConflict conflict) {
+            return new IrcSession.Poster.Result(
+                    false, ErrorCode.STATE_VERSION_CONFLICT.name());
+        } catch (Exception e) {
+            // Отказ по неизвестной причине не должен ронять соединение:
+            // человек в канале останется и попробует ещё раз.
+            log.warn("IRC: пост не создан", e);
+            return new IrcSession.Poster.Result(false, null);
         }
     }
 
