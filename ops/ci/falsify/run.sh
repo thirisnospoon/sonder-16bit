@@ -45,6 +45,7 @@ run_one "переводы строк"            eol.sh
 run_one "идентификаторы в bash"     shell.sh
 run_one "бюджеты TURBOCORE §12"     budgets.sh
 run_one "граф модулей Pascal"       layers.sh
+run_one "политика перезапуска"      restart.sh
 
 cat <<'ТЕКСТ'
 
