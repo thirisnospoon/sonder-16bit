@@ -34,7 +34,7 @@ program Node7;
 {$R-}
 
 uses
-  TcResult, TcStr, TcArena, TcFrame, TcMux, TcXml, TcSoap, TcPort,
+  TcResult, TcStr, TcArena, TcFrame, TcMux, TcXml, TcSoap, TcPort, TcLog,
   DcdTypes, DcdSrv, DmDecide;
 
 {$I errcodes.inc}
@@ -137,6 +137,41 @@ begin
 {$I+}
   if IOResult <> 0 then
     ;
+end;
+
+{ Приёмник структурного журнала: строка уходит в линию отдельным
+  каналом.
+
+  ЗАЧЕМ ЭТО ПОМИМО ФАЙЛА. `Note` пишет в NODE7.LOG простым текстом на
+  смонтированный диск эмулятора: читать его снаружи можно только потому,
+  что точка входа контейнера переносит файл в вывод. Это работает и
+  ничего не знает ни о структуре, ни о времени, ни о следе команды.
+
+  Канал 255 объявлен кадром с самого начала (`ChanLog` в tcframe) и до
+  сих пор не использовался ничем: модуль журнала был построен, покрыт
+  тестами и не подключён — проверка достижимости модулей это и нашла.
+
+  БЕЗ ОТВЕТА И БЕЗ ПОВТОРА. Журнал не имеет права мешать командам:
+  переполненное кольцо означает потерянную строку, а не задержку
+  решения. Потери считаются — молчаливая потеря наблюдаемости хуже
+  отсутствия наблюдаемости. }
+var
+  LogLost: LongInt;
+
+procedure LogToLine(Line: PChar; Len: Word); far;
+var
+  F: TFrame;
+  I: Word;
+begin
+  if Len > MaxPayload then
+    Len := MaxPayload;
+  F.Channel := ChanLog;
+  F.Flags := 0;
+  F.Len := Len;
+  for I := 0 to Len - 1 do
+    F.Payload[I] := Byte(Line[I]);
+  if not MuxSend(F).Ok then
+    Inc(LogLost);
 end;
 
 { Число строкой: WriteLn в файл умеет, но собирать из кусков удобнее
@@ -404,6 +439,17 @@ begin
     Note('решение trace=' + TraceOf(C) + ' op=' + OpName(C^.Kind)
          + ' отказано код=' + StrHead(D.errorCode));
 
+  { То же самое структурно — в линию. Файл остаётся: он переживает
+    обрыв линии, а линия доносит запись туда, где её видно вместе с
+    остальными. }
+  LogBegin(llInfo, 'decision');
+  LogFieldPas('trace', TraceOf(C));
+  LogFieldPas('op', OpName(C^.Kind));
+  LogFieldBool('accepted', D.accepted);
+  if not D.accepted then
+    LogFieldPas('code', StrHead(D.errorCode));
+  LogEnd;
+
   ReplyDecision(Chan, D);
   Inc(Served);
   { Пик снимается ПОСЛЕ решения: арена к этому моменту держит и
@@ -532,6 +578,14 @@ begin
   WriteLn('порт открыт, ждём гейтвей');
   Note('порт открыт, каналов ' + Chr(Ord('0') + LastDataChan div 10)
        + Chr(Ord('0') + LastDataChan mod 10));
+
+  { Структурный журнал включается ПОСЛЕ порта: до него отправлять
+    некуда, и строка ушла бы в никуда молча. }
+  LogLost := 0;
+  LogInit(LogToLine, llInfo);
+  LogBegin(llInfo, 'node.started');
+  LogFieldInt('channels', LastDataChan);
+  LogEnd;
 
   { Цикл до конца света. Останавливать ноду нечем и незачем: она живёт
     столько же, сколько эмулятор, а её остановка — это остановка

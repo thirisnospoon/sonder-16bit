@@ -8,6 +8,7 @@ import sonder.gateway.line.LineMux;
 import sonder.gateway.line.LineServer;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.Executors;
@@ -60,6 +61,7 @@ public final class LineTransport implements AutoCloseable {
     private final Duration timeout;
 
     private final AtomicLong hellos = new AtomicLong();
+    private final AtomicLong nodeLogLines = new AtomicLong();
     private final AtomicLong droppedOnBreak = new AtomicLong();
 
     private volatile ScheduledExecutorService sweeper;
@@ -128,7 +130,47 @@ public final class LineTransport implements AutoCloseable {
             answerHello();
             return;
         }
+        if (frame.getChannel() == Frame.CHAN_LOG) {
+            onNodeLog(frame);
+            return;
+        }
         log.debug("управляющий кадр без приветствия: {}", frame);
+    }
+
+    /**
+     * Строка структурного журнала ядра.
+     *
+     * <p>Канал 255 объявлен кадром с самого начала и до сих пор не нёс
+     * ничего: модуль журнала в ядре был построен, покрыт тестами и не
+     * подключён — нашла это проверка достижимости модулей Pascal.
+     * Единственным способом услышать ядро оставался файл на
+     * смонтированном диске эмулятора, который точка входа контейнера
+     * переносит в вывод: без структуры, без уровня и в стороне от
+     * остальных записей.
+     *
+     * <p>СТРОКА ЧУЖАЯ, и обращаться с ней надо соответственно. Она
+     * приходит из-за границы процесса, её длина ограничена кадром, а
+     * содержимое — это NDJSON, собранный на шестнадцати битах.
+     * Разбирать его здесь незачем: сборщику логов он нужен как есть, а
+     * человеку читается и так. Переводы строк убираются — иначе одна
+     * запись ядра разъехалась бы на несколько строк журнала оболочки и
+     * перестала быть одной записью.
+     */
+    private void onNodeLog(Frame frame) {
+        nodeLogLines.incrementAndGet();
+        String line = new String(frame.getPayload(), StandardCharsets.UTF_8)
+                .replace('\n', ' ')
+                .replace('\r', ' ')
+                .trim();
+        if (line.isEmpty()) {
+            return;
+        }
+        log.info("NODE-7 {}", line);
+    }
+
+    /** Сколько строк журнала пришло от ядра. Метрика, а не логика. */
+    public long getNodeLogLines() {
+        return nodeLogLines.get();
     }
 
     private void answerHello() {
