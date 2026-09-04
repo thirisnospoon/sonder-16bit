@@ -160,6 +160,13 @@ cmd_codegen() {
   step "эталонные ответы ядра"
   run_dos bash ops/ci/gen-replies.sh || return 1
 
+  # Корпус решений о создании поста — из НАСТОЯЩЕГО DecideCreatePost.
+  # Второе мнение на Прологе сверяется не с текстом правил, а с тем, что
+  # ядро решило; устаревший корпус оставил бы проверку зелёной,
+  # сверяющейся с прошлым (ADR-0022).
+  step "корпус решений домена"
+  run_dos bash ops/ci/gen-domain-cases.sh || return 1
+
   step "типы веба из OpenAPI"
   run_py python tools/gen-api-types/gen_api_types.py || return 1
 
@@ -244,6 +251,7 @@ cmd_verify() {
   # порождаются, идёт секунду.
   cmd_reclen_test         || rc=1
   cmd_check_schedule      || rc=1
+  cmd_domain_crosscheck   || rc=1
   cmd_test                || rc=1
   # Java входит в verify с самого начала. Проверка, охватывающая половину
   # кодовой базы, уже один раз позволила регрессии просидеть несколько
@@ -620,6 +628,18 @@ cmd_digest_schedule() {
   bash ops/ci/digest-schedule.sh || return 1
 }
 
+# Второе мнение о доменных правилах: согласны ли Паскаль и Пролог.
+#
+# Правильность правил подтверждают тесты, написанные тем же человеком,
+# что и правила: ошибка в ПОНИМАНИИ правила уходит в обе стороны разом,
+# и обе стороны согласны. Пролог решает те же случаи заново и обязан
+# сойтись на каждом (ADR-0022).
+cmd_domain_crosscheck() {
+  need_docker
+  step "второе мнение о доменных правилах"
+  bash ops/ci/domain-crosscheck.sh || return 1
+}
+
 cmd_reclen_test() {
   need_docker
   step "самопроверка сборщика Brainfuck"
@@ -803,6 +823,7 @@ Sonder — цели
   report               ночной свод: выгрузка, пакет на COBOL, отчёт
   report-test          свод на эталонных данных, итоги известны заранее
   reclen-test          длина записей свода вторым мнением, на Brainfuck
+  domain-crosscheck    доменные правила вторым мнением, на Прологе
   digest-schedule      срабатывает ли расписание свода на поднятом составе
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
@@ -844,6 +865,7 @@ case "${1:-help}" in
   report)             cmd_report ;;
   report-test)        cmd_report_test ;;
   reclen-test)        cmd_reclen_test ;;
+  domain-crosscheck)  cmd_domain_crosscheck ;;
   digest-schedule)    cmd_digest_schedule ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
