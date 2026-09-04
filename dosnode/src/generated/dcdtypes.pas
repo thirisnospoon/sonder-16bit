@@ -184,6 +184,7 @@ type
     lineErrors: LongInt;
     rxBytes: LongInt;
     txBytes: LongInt;
+    logLinesLost: LongInt;
   end;
 
   TDomainEventNode = record

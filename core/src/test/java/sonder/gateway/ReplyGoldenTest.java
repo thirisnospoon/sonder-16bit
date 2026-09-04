@@ -266,6 +266,9 @@ class ReplyGoldenTest {
         assertEquals(5, p.getLineErrors());
         assertEquals(90123, p.getRxBytes());
         assertEquals(45061, p.getTxBytes());
+        // Потери журнала: строка, не ушедшая в линию, ничего не ломает и
+        // потому невидима — неполный журнал читается как полный.
+        assertEquals(7, p.getLogLinesLost());
     }
 
     @Test
@@ -273,7 +276,7 @@ class ReplyGoldenTest {
     void pongCheckedFieldByField() throws Exception {
         // Проверка выше перечисляет поля руками, и поле, добавленное в
         // контракт, в неё не попадёт: она останется зелёной, сверяя
-        // прежние девять из десяти. Здесь число полей берётся у самого
+        // прежние десять из одиннадцати. Здесь число полей берётся у самого
         // ответа — и расходится с числом сверенных.
         int declared = 0;
         for (java.lang.reflect.Method m : PingResponse.class.getMethods()) {
@@ -289,5 +292,5 @@ class ReplyGoldenTest {
     }
 
     /** Сколько полей пинга сверяет {@link #pongCarriesMetrics()}. */
-    private static final int CHECKED_PONG_FIELDS = 10;
+    private static final int CHECKED_PONG_FIELDS = 11;
 }

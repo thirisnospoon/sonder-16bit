@@ -343,6 +343,12 @@
             <xs:element name="lineErrors"        type="xs:int"/>
             <xs:element name="rxBytes"           type="xs:int"/>
             <xs:element name="txBytes"           type="xs:int"/>
+            <!-- Строк журнала, не ушедших в линию: кольцо было полно.
+                 Журнал не имеет права мешать командам, поэтому запись
+                 не ждёт места и теряется — но потеря НАБЛЮДАЕМОСТИ,
+                 о которой никто не знает, хуже её отсутствия: тогда
+                 неполный журнал читается как полный. -->
+            <xs:element name="logLinesLost"      type="xs:int"/>
           </xs:sequence>
         </xs:complexType>
       </xs:element>

@@ -895,6 +895,7 @@ begin
   SoapElementInt(W, 'lineErrors', P.lineErrors);
   SoapElementInt(W, 'rxBytes', P.rxBytes);
   SoapElementInt(W, 'txBytes', P.txBytes);
+  SoapElementInt(W, 'logLinesLost', P.logLinesLost);
   SoapClose(W, 'PingResponse');
 end;
 

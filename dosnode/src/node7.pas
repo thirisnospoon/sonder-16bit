@@ -302,6 +302,10 @@ begin
   P.lineErrors := PS.LineErrs + PS.Overruns;
   P.rxBytes := PS.RxBytes;
   P.txBytes := PS.TxBytes;
+  { Потери журнала. Считаются с самого начала и до этой строки были
+    видны только самой ноде — то есть «потери считаются» было правдой
+    лишь наполовину: считались, но не сообщались. }
+  P.logLinesLost := LogLost;
 
   SoapWriterInit(W, Chan, Sink);
   SoapBeginEnvelope(W);

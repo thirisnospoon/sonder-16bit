@@ -156,6 +156,7 @@ public final class NodeProbe {
         out.put("lineErrors", m.getLineErrors());
         out.put("rxBytes", m.getRxBytes());
         out.put("txBytes", m.getTxBytes());
+        out.put("logLinesLost", m.getLogLinesLost());
         return out;
     }
 }

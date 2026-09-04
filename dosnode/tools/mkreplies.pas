@@ -195,6 +195,9 @@ begin
   P.lineErrors := 5;
   P.rxBytes := 90123;
   P.txBytes := 45061;
+  { Потери журнала. Значение отличное от всех прочих: одинаковые числа
+    в эталоне не поймали бы перепутанные местами поля. }
+  P.logLinesLost := 7;
 
   StartOne;
   SoapWriterInit(W, 5, Collect);
