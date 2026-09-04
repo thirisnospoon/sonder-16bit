@@ -9,10 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,12 +67,23 @@ public class OutboxDoorbell implements EventListener, InitializingBean, Disposab
      */
     public static final String EVENT_NAME = "sonder_outbox";
 
+    /**
+     * Сколько ждать возврата пробного события.
+     *
+     * <p>Живой канал приносит его за единицы миллисекунд — измеренный
+     * лаг доставки события порядка сорока. Две секунды — запас в
+     * полсотни раз; больше значило бы держать поток сторожа впустую,
+     * меньше — объявлять мёртвым канал, задержавшийся под нагрузкой.
+     */
+    private static final long PROBE_WAIT_MS = 2000;
+
     private final DataSource dataSource;
     private final OutboxPump pump;
 
     private final AtomicBoolean queued = new AtomicBoolean();
     private final AtomicLong rings = new AtomicLong();
     private final AtomicLong pumps = new AtomicLong();
+    private final AtomicLong subscriptions = new AtomicLong();
 
     private ExecutorService worker;
     private EventManager events;
@@ -87,10 +100,17 @@ public class OutboxDoorbell implements EventListener, InitializingBean, Disposab
             t.setDaemon(true);
             return t;
         });
+        subscribe();
+    }
+
+    /** Подписаться заново. Зовётся при старте и сторожем. */
+    private synchronized void subscribe() {
         try (Connection c = dataSource.getConnection()) {
-            events = FBEventManager.createFor(c);
-            events.connect();
-            events.addEventListener(EVENT_NAME, this);
+            EventManager fresh = FBEventManager.createFor(c);
+            fresh.connect();
+            fresh.addEventListener(EVENT_NAME, this);
+            events = fresh;
+            subscriptions.incrementAndGet();
             log.info("звонок очереди подписан на событие {}", EVENT_NAME);
         } catch (Exception e) {
             // Не поднявшийся звонок — не повод не подняться приложению:
@@ -101,6 +121,101 @@ public class OutboxDoorbell implements EventListener, InitializingBean, Disposab
                     e.toString());
             events = null;
         }
+    }
+
+    /**
+     * Сторож подписки: ЗВОНИТ В ЗВОНОК, а не спрашивает его.
+     *
+     * <p>ЗВОНОК НЕ ПЕРЕЖИВАЛ ПЕРЕЗАПУСК БАЗЫ, и это не было видно ничем.
+     * Канал событий Firebird умирает вместе с соединением, подписка
+     * делалась ОДИН РАЗ при старте, а {@code isSubscribed()} возвращал
+     * «да» и после смерти канала — смотрел на ссылку, а не на состояние.
+     * Заметить можно было только по времени: измерено 93 мс до
+     * перезапуска базы и 794 после, без единой записи в журнале.
+     *
+     * <p>ПЕРВАЯ ПОПЫТКА ПОЧИНКИ СПРАШИВАЛА {@code isConnected()} И НЕ
+     * СРАБОТАЛА: Jaybird отвечает «подключён» и на мёртвом канале —
+     * метод говорит о том, звали ли {@code connect()}, а не о том, жив
+     * ли сокет. Сторож честно ходил каждые тридцать секунд и каждый раз
+     * получал «всё в порядке» о неработающем звонке.
+     *
+     * <p>Поэтому проверка не спрашивает, а ТРЕБУЕТ ДОКАЗАТЬ: шлёт
+     * событие сама и смотрит, пришло ли оно. Не пришло за отведённый
+     * срок — канал мёртв, независимо от того, что о себе думает
+     * библиотека. Стоит это одной крошечной транзакции в полминуты;
+     * заход дренажа, который она вызовет, найдёт пустую очередь и
+     * закончится немедленно.
+     *
+     * <p>Ложного «живой» тут быть не может: если событие пришло, канал
+     * работает — неважно, наше это событие или чужое.
+     */
+    @Scheduled(fixedDelayString = "${sonder.outbox.doorbell-watch-ms:30000}",
+               initialDelayString = "${sonder.outbox.doorbell-watch-ms:30000}")
+    public void watch() {
+        if (proven()) {
+            return;
+        }
+        log.warn("звонок очереди не отозвался на пробное событие — переподписываемся");
+        dropQuietly();
+        subscribe();
+    }
+
+    /**
+     * Доказана ли работа звонка: шлём событие и ждём его же.
+     *
+     * <p>Отсутствие подписки доказывать нечем — сразу «нет».
+     */
+    private boolean proven() {
+        if (!hasChannel()) {
+            return false;
+        }
+        long before = rings.get();
+        try (Connection c = dataSource.getConnection();
+             Statement st = c.createStatement()) {
+            // POST_EVENT доставляется при коммите, поэтому блок должен
+            // завершиться транзакцией. Автокоммит соединения из пула это
+            // и делает.
+            st.execute("EXECUTE BLOCK AS BEGIN POST_EVENT '" + EVENT_NAME + "'; END");
+        } catch (Exception e) {
+            // Не смогли даже послать — база недоступна. Переподписка
+            // сейчас всё равно не удастся, и шуметь незачем: следующий
+            // виток разберётся.
+            log.debug("пробное событие не послалось: {}", e.toString());
+            return true;
+        }
+
+        long deadline = System.currentTimeMillis() + PROBE_WAIT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (rings.get() > before) {
+                return true;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Есть ли вообще ссылка на канал. */
+    private synchronized boolean hasChannel() {
+        return events != null;
+    }
+
+    /** Отпустить мёртвое, не поднимая шума о мёртвом. */
+    private synchronized void dropQuietly() {
+        if (events == null) {
+            return;
+        }
+        try {
+            events.removeEventListener(EVENT_NAME, this);
+            events.close();
+        } catch (Exception e) {
+            log.debug("прежний звонок не закрылся: {}", e.toString());
+        }
+        events = null;
     }
 
     @Override
@@ -135,22 +250,25 @@ public class OutboxDoorbell implements EventListener, InitializingBean, Disposab
         return pumps.get();
     }
 
-    /** Подписался ли звонок на самом деле. */
+    /**
+     * Подписан ли звонок НА САМОМ ДЕЛЕ.
+     *
+     * <p>Прежняя редакция возвращала {@code events != null} — то есть
+     * «подписку когда-то создавали». После перезапуска базы канал мёртв,
+     * а ссылка цела, и метод отвечал «да» о неработающем звонке.
+     */
     public boolean isSubscribed() {
-        return events != null;
+        return hasChannel();
+    }
+
+    /** Сколько раз подписывались. Больше одного — были потери. */
+    public long getSubscriptions() {
+        return subscriptions.get();
     }
 
     @Override
     public void destroy() {
-        if (events != null) {
-            try {
-                events.removeEventListener(EVENT_NAME, this);
-                events.close();
-            } catch (Exception e) {
-                log.warn("звонок не отписался: {}", e.toString());
-            }
-            events = null;
-        }
+        dropQuietly();
         if (worker != null) {
             worker.shutdownNow();
             try {
