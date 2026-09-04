@@ -59,6 +59,16 @@ DAY_SECONDS=86400
        -Dloader.main=sonder.report.DigestExport \
        org.springframework.boot.loader.PropertiesLauncher \
        "$out/posts.dat" || return 1
+  # ДЛИНА ЗАПИСЕЙ ПРОВЕРЯЕТСЯ ДО ПАКЕТА, а не после отчёта. У файла
+  # фиксированной ширины нет ни разделителей, ни заголовков: запись не
+  # той длины сдвигает всё последующее, COBOL читает мусор и НЕ ЗАМЕЧАЕТ
+  # этого — отчёт получается, только числа в нём неправда. Ночью на них
+  # некому посмотреть (ADR-0019).
+  echo "$(date -u +%FT%TZ) свод: длина записей"
+  bash /usr/local/bin/reclen-verdict \
+    "$out/posts.dat" /etc/sonder/digest-v1.yaml \
+    beef /usr/local/share/reclen.bf || return 1
+
   echo "$(date -u +%FT%TZ) свод: пакет"
   SONDER_DIGEST_INPUT="$out/posts.dat" \
   SONDER_DIGEST_OUTPUT="$out/digest.txt" \
