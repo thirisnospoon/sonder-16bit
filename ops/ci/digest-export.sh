@@ -19,6 +19,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TARGET="${1:?нужен путь к файлу выгрузки}"
+shift
 
 cd "$ROOT" || exit 1
 
@@ -40,10 +41,14 @@ fi
 # Классы берутся из ОБРАЗА ОБОЛОЧКИ: там уже лежит собранный jar со
 # всеми зависимостями, включая драйвер Jaybird. Собирать их второй раз
 # значило бы завести вторую сборку, которая однажды разойдётся с первой.
-docker run --rm   --network "$NET"   -v "$TARGET_DIR:/out"   -e SONDER_DB_URL="$DB_URL"   -e SONDER_DB_USER="${SONDER_DB_USER:-sysdba}"   -e SONDER_DB_PASSWORD="$DB_PASSWORD"   --entrypoint java   sonder-app   -cp /app/sonder.jar   -Dloader.main=sonder.report.DigestExport   org.springframework.boot.loader.PropertiesLauncher   "/out/$TARGET_NAME" || exit 1
+docker run --rm   --network "$NET"   -v "$TARGET_DIR:/out"   -e SONDER_DB_URL="$DB_URL"   -e SONDER_DB_USER="${SONDER_DB_USER:-sysdba}"   -e SONDER_DB_PASSWORD="$DB_PASSWORD"   --entrypoint java   sonder-app   -cp /app/sonder.jar   -Dloader.main=sonder.report.DigestExport   org.springframework.boot.loader.PropertiesLauncher   "/out/$TARGET_NAME" "$@" || exit 1
 
-if [ ! -s "$TARGET" ]; then
-  echo "выгрузка пуста" >&2
+# ПУСТОЙ ФАЙЛ — НЕ ОШИБКА. Период без единого поста бывает: выходной,
+# первый день после запуска, сутки тишины. Отличать «нечего считать» от
+# «выгрузка не отработала» обязан код возврата выгрузки, а не размер
+# файла: свод по пустому входу печатает шапку и нули, и это ответ.
+if [ ! -f "$TARGET" ]; then
+  echo "выгрузка не создала файл" >&2
   exit 1
 fi
 

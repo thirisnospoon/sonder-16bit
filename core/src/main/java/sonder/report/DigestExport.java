@@ -52,6 +52,8 @@ public final class DigestExport {
                     + " FROM posts p"
                     + " JOIN users u ON u.id = p.author_id"
                     + " WHERE p.status = 'VISIBLE'"
+                    + "   AND p.created_at >= ?"
+                    + "   AND p.created_at < ?"
                     + " ORDER BY u.nick, p.created_at";
 
     private static final DateTimeFormatter ДЕНЬ =
@@ -60,9 +62,40 @@ public final class DigestExport {
     private DigestExport() {
     }
 
+    /**
+     * Начало периода.
+     *
+     * <p>ГРАНИЦА ПОЛУОТКРЫТАЯ: от начала дня включительно до начала
+     * следующего исключительно. Иначе пост, созданный ровно в полночь,
+     * попал бы в два свода сразу или ни в один — смотря как округлили, —
+     * и заметить это можно было бы только сложением двух отчётов.
+     *
+     * <p>По умолчанию ВЧЕРАШНИЙ день: свод ночной, он считает
+     * закончившиеся сутки, а не текущие, у которых ещё будут записи.
+     */
+    private static LocalDate начало(String[] args) {
+        for (String a : args) {
+            if (a.startsWith("--since=")) {
+                return LocalDate.parse(a.substring("--since=".length()));
+            }
+        }
+        return LocalDate.now(ZoneOffset.UTC).minusDays(1);
+    }
+
+    /** Конец периода, исключительно. По умолчанию — сутки от начала. */
+    private static LocalDate конец(String[] args, LocalDate since) {
+        for (String a : args) {
+            if (a.startsWith("--until=")) {
+                return LocalDate.parse(a.substring("--until=".length()));
+            }
+        }
+        return since.plusDays(1);
+    }
+
     public static void main(String[] args) {
-        if (args.length != 1) {
-            System.err.println("нужно: DigestExport <путь к файлу>");
+        if (args.length < 1) {
+            System.err.println("нужно: DigestExport <путь>"
+                    + " [--since=ГГГГ-ММ-ДД] [--until=ГГГГ-ММ-ДД]");
             System.exit(2);
         }
         String url = требуется("SONDER_DB_URL");
@@ -70,9 +103,18 @@ public final class DigestExport {
         String password = либо("SONDER_DB_PASSWORD", "masterkey");
 
         Path target = Paths.get(args[0]);
+        LocalDate since = начало(args);
+        LocalDate until = конец(args, since);
+        if (!until.isAfter(since)) {
+            System.err.println("период пуст: --since=" + since
+                    + " не раньше --until=" + until);
+            System.exit(2);
+        }
+
         try {
-            long записей = выгрузить(url, user, password, target);
-            System.out.println("записей: " + записей
+            long записей = выгрузить(url, user, password, target, since, until);
+            System.out.println("период: " + since + " .. " + until
+                    + " (не включая), записей: " + записей
                     + ", по " + DigestRecord.BYTES + " байт");
         } catch (SQLException | IOException e) {
             System.err.println("выгрузка не удалась: " + e);
@@ -81,13 +123,34 @@ public final class DigestExport {
     }
 
     private static long выгрузить(String url, String user, String password,
-                                  Path target)
+                                  Path target,
+                                  LocalDate since, LocalDate until)
             throws SQLException, IOException {
         Files.createDirectories(target.toAbsolutePath().getParent());
-        long n = 0;
         try (Connection c = DriverManager.getConnection(url, user, password);
-             PreparedStatement ps = c.prepareStatement(SQL);
-             ResultSet rs = ps.executeQuery();
+             PreparedStatement ps = c.prepareStatement(SQL)) {
+            ps.setTimestamp(1, Timestamp.from(
+                    since.atStartOfDay(ZoneOffset.UTC).toInstant()));
+            ps.setTimestamp(2, Timestamp.from(
+                    until.atStartOfDay(ZoneOffset.UTC).toInstant()));
+            return записать(ps, target);
+        }
+    }
+
+    /**
+     * Прогнать выборку в файл.
+     *
+     * <p>Файл создаётся ВСЕГДА, даже когда записей ноль. Пустой период —
+     * обычное дело: выходной, первый день после запуска, сутки без
+     * единого поста. Отсутствие файла заставило бы пакет отличать
+     * «нечего считать» от «выгрузка не отработала», а это разные беды с
+     * разной срочностью. Свод по пустому входу печатает шапку и нули:
+     * это ответ, а не отказ.
+     */
+    private static long записать(PreparedStatement ps, Path target)
+            throws SQLException, IOException {
+        long n = 0;
+        try (ResultSet rs = ps.executeQuery();
              OutputStream out = new BufferedOutputStream(
                      Files.newOutputStream(target))) {
             while (rs.next()) {

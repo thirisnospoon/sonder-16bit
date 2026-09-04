@@ -19,8 +19,10 @@ cd "$ROOT" || exit 1
 
 mkdir -p "$OUT"
 
+# Период: по умолчанию вчерашние сутки — свод ночной. Аргументы
+# прокидываются в выгрузку как есть.
 echo "==> выгрузка постов"
-bash ops/ci/digest-export.sh "$OUT/posts.dat" || exit 1
+bash ops/ci/digest-export.sh "$OUT/posts.dat" "$@" || exit 1
 RECORDS=$(wc -l < "$OUT/posts.dat")
 BYTES=$(wc -c < "$OUT/posts.dat")
 echo "  записей: $RECORDS, байт: $BYTES"
