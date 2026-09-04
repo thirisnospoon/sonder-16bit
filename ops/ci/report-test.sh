@@ -36,6 +36,13 @@ docker run --rm -v "$ROOT:/work" -v "$WORK:/out" -w /work sonder/contracts:1 \
   python report/test/make-fixture.py /out/posts.dat \
   || fail "не построить эталонный вход"
 
+# ЭТАЛОН ТОЖЕ ПРОВЕРЯЕТСЯ. Он такой же файл фиксированной ширины, и
+# порождает его такая же программа — со своим представлением о байтах и
+# символах. Эталон неверной длины сделал бы этот тест проверкой того,
+# что две ошибки совпали.
+bash ops/ci/reclen.sh "$WORK/posts.dat" \
+  || fail "эталонный вход сам не той длины"
+
 echo
 echo "==> свод"
 docker run --rm \
