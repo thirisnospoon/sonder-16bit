@@ -25,6 +25,8 @@ import sonder.contract.decider.RegisterUserRequest;
 import sonder.contract.decider.UnfollowUserRequest;
 import sonder.contract.decider.DeletePostRequest;
 import sonder.shell.auth.Passwords;
+import sonder.shell.outbox.OutboxRecord;
+import sonder.shell.stream.FeedStream;
 import sonder.shell.irc.IrcServer;
 
 import javax.sql.DataSource;
@@ -152,6 +154,9 @@ class IrcGatewayIT {
     @Autowired
     private IrcServer irc;
 
+    @Autowired
+    private FeedStream stream;
+
     @BeforeEach
     void seed() throws Exception {
         assumeTrue(!System.getProperty("sonder.it.jdbcUrl", "").isEmpty(),
@@ -266,6 +271,51 @@ class IrcGatewayIT {
         assertEquals(0, left, "сессия пережила соединение");
     }
 
+    /**
+     * Создать пост так, как это делает путь HTTP, — но без HTTP.
+     *
+     * <p>Пишутся ровно те три строки, что пишет обработчик команды:
+     * пост, строка проекции (чья это лента) и событие. Идти сюда через
+     * настоящий {@code POST /api/posts} значило бы проверять заодно
+     * контроллер, куку и сериализацию, — всё это проверено своими
+     * тестами, а здесь нужен только повод для рассылки.
+     */
+    private String createPostAsHttpWould(String body) throws Exception {
+        String postId = "p-" + System.nanoTime();
+        try (Connection c = dataSource.getConnection()) {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO posts (id, author_id, body, status, version,"
+                            + " created_at) VALUES (?, 'u-1', ?, 'VISIBLE', 0, ?)")) {
+                ps.setString(1, postId);
+                ps.setString(2, body);
+                ps.setTimestamp(3, Timestamp.from(Instant.now()));
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO feed_entries (owner_id, post_id, author_id,"
+                            + " created_at) VALUES ('u-1', ?, 'u-1', ?)")) {
+                ps.setString(1, postId);
+                ps.setTimestamp(2, Timestamp.from(Instant.now()));
+                ps.executeUpdate();
+            }
+        }
+        return postId;
+    }
+
+    /**
+     * Позвать рассылку так, как её зовёт дренаж очереди.
+     *
+     * <p>Дренаж в этой проверке выключен намеренно: он разбирает outbox
+     * сам по себе, и ждать его значило бы проверять расписание, а не
+     * рассылку. Событие подаётся тем же вызовом, которым его подал бы
+     * дренаж после коммита.
+     */
+    private void deliverToListeners(String postId) {
+        stream.onPublished(java.util.Collections.singletonList(
+                new OutboxRecord(1L, postId, "post.created",
+                        "{\"actor\":\"u-1\"}", "t-irc", 0)));
+    }
+
     private int posts() throws Exception {
         try (Connection c = dataSource.getConnection();
              Statement st = c.createStatement();
@@ -330,6 +380,47 @@ class IrcGatewayIT {
             assertEquals("u-1", rs.getString(1), "пост записан не тому автору");
             assertEquals("пост, написанный из ирки", rs.getString(2),
                     "текст доехал не целиком");
+        }
+    }
+
+    /**
+     * Обратное направление: пост, созданный ЧЕРЕЗ HTTP, приходит в канал
+     * IRC. Ради этого рассылка и перестала быть привязанной к SSE.
+     *
+     * <p>Проверяется именно перекрёстный случай — написано в браузере,
+     * прочитано в ирке, — потому что он единственный доказывает, что
+     * ответ на вопрос «чья это новость» ОДИН. Напиши мы из IRC и прочти
+     * в IRC, тот же результат дала бы вторая, отдельная рассылка.
+     */
+    @Test
+    @DisplayName("пост из HTTP приходит в канал IRC той же рассылкой")
+    void postFromHttpReachesIrcChannel() throws Exception {
+        try (Client client = new Client(irc.boundPort())) {
+            client.send("PASS тайна");
+            client.send("NICK andrey");
+            client.send("USER andrey 0 * :Андрей");
+            client.until(" 366 ");
+
+            // Ждём НАБЛЮДАЕМОГО условия, а не «немножко». Подписка
+            // случается после отправки приветствия, и событие, посланное
+            // между этими двумя мгновениями, ушло бы в пустоту — тест
+            // мигал бы раз в сотню прогонов, и объяснить это было бы
+            // нечем.
+            long deadline = System.currentTimeMillis() + 5_000;
+            while (stream.openCount() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(stream.openCount() > 0, "соединение не подписалось на ленту");
+
+            // Пост создаётся ПОМИМО IRC — прямо через тот же обработчик,
+            // что зовёт REST, — и в свою же ленту автор его получает.
+            String postId = createPostAsHttpWould("новость из браузера");
+            deliverToListeners(postId);
+
+            List<String> got = client.until("новость из браузера");
+            assertTrue(has(got, "PRIVMSG #feed"), "новость пришла не в канал: " + got);
+            assertTrue(has(got, ":andrey!andrey@sonder"),
+                    "отправителем оказался не автор: " + got);
         }
     }
 

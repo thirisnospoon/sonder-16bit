@@ -60,7 +60,7 @@ public class FeedStream implements OutboxDrainer.Published {
      * Открытые соединения по пользователям. Один человек может смотреть
      * с двух вкладок, поэтому список, а не одно соединение.
      */
-    private final Map<String, List<SseEmitter>> listeners = new ConcurrentHashMap<>();
+    private final Map<String, List<FeedListener>> listeners = new ConcurrentHashMap<>();
 
     public FeedStream(DataSource dataSource) {
         this.dataSource = dataSource;
@@ -77,32 +77,45 @@ public class FeedStream implements OutboxDrainer.Published {
      */
     public SseEmitter open(String userId, long timeoutMillis) {
         SseEmitter emitter = new SseEmitter(timeoutMillis);
-        List<SseEmitter> forUser =
-                listeners.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>());
-        forUser.add(emitter);
+        SseFeedListener listener = new SseFeedListener(emitter);
+        subscribe(userId, listener);
 
         try {
             emitter.send(SseEmitter.event().comment("поток открыт"));
         } catch (IOException | IllegalStateException gone) {
             // Клиент ушёл, не дождавшись даже приветствия.
-            forUser.remove(emitter);
+            unsubscribe(userId, listener);
         }
 
         // Все три исхода снимают соединение со списка. Не снять хотя бы
         // один — значит копить мёртвые соединения, пока их не станет
         // больше, чем живых.
-        emitter.onCompletion(() -> remove(userId, emitter));
-        emitter.onTimeout(() -> remove(userId, emitter));
-        emitter.onError(e -> remove(userId, emitter));
+        emitter.onCompletion(() -> unsubscribe(userId, listener));
+        emitter.onTimeout(() -> unsubscribe(userId, listener));
+        emitter.onError(e -> unsubscribe(userId, listener));
         return emitter;
     }
 
-    private void remove(String userId, SseEmitter emitter) {
-        List<SseEmitter> forUser = listeners.get(userId);
+    /**
+     * Подписать слушателя, доставляющего своим способом.
+     *
+     * <p>Открыто для носителей, у которых нет {@code SseEmitter}, — то
+     * есть для всех, кроме браузера. Отписывать обязан тот же, кто
+     * подписал: рассылка узнаёт о смерти соединения только попыткой
+     * записи, а сокет, закрытый своей стороной, скажет об этом раньше и
+     * точнее.
+     */
+    public void subscribe(String userId, FeedListener listener) {
+        listeners.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>())
+                .add(listener);
+    }
+
+    public void unsubscribe(String userId, FeedListener listener) {
+        List<FeedListener> forUser = listeners.get(userId);
         if (forUser == null) {
             return;
         }
-        forUser.remove(emitter);
+        forUser.remove(listener);
         // Пустой список тоже мусор: пользователей много, а смотрят
         // единицы.
         if (forUser.isEmpty()) {
@@ -113,10 +126,46 @@ public class FeedStream implements OutboxDrainer.Published {
     /** Сколько сейчас открытых соединений. Метрика, а не логика. */
     public int openCount() {
         int n = 0;
-        for (List<SseEmitter> forUser : listeners.values()) {
+        for (List<FeedListener> forUser : listeners.values()) {
             n += forUser.size();
         }
         return n;
+    }
+
+    /**
+     * Доставка через SSE.
+     *
+     * <p>Особенность носителя остаётся здесь: закрытый {@code SseEmitter}
+     * бросает {@code IllegalStateException}, а не {@code IOException}, и
+     * рассылка не должна об этом знать.
+     */
+    private static final class SseFeedListener implements FeedListener {
+        private final SseEmitter emitter;
+
+        SseFeedListener(SseEmitter emitter) {
+            this.emitter = emitter;
+        }
+
+        @Override
+        public void deliver(OutboxRecord record) throws IOException {
+            try {
+                emitter.send(SseEmitter.event()
+                        .id(String.valueOf(record.getId()))
+                        .name(record.getType())
+                        .data(record.getPayload()));
+            } catch (IllegalStateException closed) {
+                throw new IOException("поток закрыт", closed);
+            }
+        }
+
+        @Override
+        public void beat() throws IOException {
+            try {
+                emitter.send(SseEmitter.event().comment("тук"));
+            } catch (IllegalStateException closed) {
+                throw new IOException("поток закрыт", closed);
+            }
+        }
     }
 
     @Override
@@ -159,25 +208,22 @@ public class FeedStream implements OutboxDrainer.Published {
     }
 
     private void send(String userId, OutboxRecord record) {
-        List<SseEmitter> forUser = listeners.get(userId);
+        List<FeedListener> forUser = listeners.get(userId);
         if (forUser == null || forUser.isEmpty()) {
             return;
         }
-        List<SseEmitter> dead = new ArrayList<>();
-        for (SseEmitter emitter : forUser) {
+        List<FeedListener> dead = new ArrayList<>();
+        for (FeedListener listener : forUser) {
             try {
-                emitter.send(SseEmitter.event()
-                        .id(String.valueOf(record.getId()))
-                        .name(record.getType())
-                        .data(record.getPayload()));
-            } catch (IOException | IllegalStateException gone) {
+                listener.deliver(record);
+            } catch (IOException gone) {
                 // Клиент ушёл. Это не отказ системы, а обычная жизнь
                 // открытого соединения.
-                dead.add(emitter);
+                dead.add(listener);
             }
         }
-        for (SseEmitter emitter : dead) {
-            remove(userId, emitter);
+        for (FeedListener listener : dead) {
+            unsubscribe(userId, listener);
         }
     }
 
@@ -194,12 +240,12 @@ public class FeedStream implements OutboxDrainer.Published {
      */
     @Scheduled(fixedDelayString = "${sonder.events.heartbeat-ms:20000}")
     public void heartbeat() {
-        for (Map.Entry<String, List<SseEmitter>> entry : listeners.entrySet()) {
-            for (SseEmitter emitter : entry.getValue()) {
+        for (Map.Entry<String, List<FeedListener>> entry : listeners.entrySet()) {
+            for (FeedListener listener : entry.getValue()) {
                 try {
-                    emitter.send(SseEmitter.event().comment("тук"));
-                } catch (IOException | IllegalStateException gone) {
-                    remove(entry.getKey(), emitter);
+                    listener.beat();
+                } catch (IOException gone) {
+                    unsubscribe(entry.getKey(), listener);
                 }
             }
         }

@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
 import sonder.contract.decider.Decider;
+import sonder.shell.stream.FeedStream;
 
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -37,12 +38,13 @@ public class IrcServerConfig {
     public IrcServer ircServer(
             DataSource dataSource,
             Decider decider,
+            FeedStream feed,
             @Value("${sonder.irc.port}") int port,
             @Value("${sonder.irc.max-connections:64}") int maxConnections,
             @Value("${sonder.irc.handshake-timeout-ms:60000}") int handshakeTimeoutMs)
             throws IOException {
-        IrcServer server = new IrcServer(
-                dataSource, decider, port, maxConnections, handshakeTimeoutMs);
+        IrcServer server = new IrcServer(dataSource, decider, feed,
+                port, maxConnections, handshakeTimeoutMs);
         server.start();
         return server;
     }

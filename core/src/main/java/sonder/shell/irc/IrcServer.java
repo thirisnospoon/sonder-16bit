@@ -11,6 +11,7 @@ import sonder.shell.auth.Login;
 import sonder.shell.auth.SessionStore;
 import sonder.contract.decider.Decider;
 import sonder.shell.rest.Trace;
+import sonder.shell.stream.FeedStream;
 
 import javax.sql.DataSource;
 import java.io.BufferedOutputStream;
@@ -57,6 +58,7 @@ public class IrcServer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(IrcServer.class);
 
     private final DataSource dataSource;
+    private final FeedStream feed;
     private final CommandFlow flow;
     private final Decider decider;
     private final int port;
@@ -69,9 +71,10 @@ public class IrcServer implements AutoCloseable {
     private volatile Thread acceptor;
     private volatile boolean stopping;
 
-    public IrcServer(DataSource dataSource, Decider decider, int port,
-                     int maxConnections, int handshakeTimeoutMs) {
+    public IrcServer(DataSource dataSource, Decider decider, FeedStream feed,
+                     int port, int maxConnections, int handshakeTimeoutMs) {
         this.dataSource = dataSource;
+        this.feed = feed;
         this.decider = decider;
         // Тот же поток команды, что у REST: загрузка состояния, решение
         // на ядре, сохранение с оптимистической блокировкой и запись в
@@ -148,9 +151,24 @@ public class IrcServer implements AutoCloseable {
 
     private void serve(Socket socket) {
         String token = null;
+        String userId = null;
+        IrcFeedListener listener = null;
+
         try (Socket s = socket;
              InputStream in = s.getInputStream();
              OutputStream out = new BufferedOutputStream(s.getOutputStream())) {
+
+            // ЗАМОК НА ЗАПИСЬ. В сокет пишут двое: этот поток отвечает на
+            // команды, а поток рассылки доставляет новости ленты. Без
+            // замка две строки перемежались бы посреди друг друга —
+            // изредка, под нагрузкой, и выглядело бы это как испорченный
+            // протокол, а не как гонка.
+            final Object writeLock = new Object();
+            IrcFeedListener.Wire wire = line -> {
+                synchronized (writeLock) {
+                    send(out, line);
+                }
+            };
 
             // Срок на рукопожатие: молчащий клиент не должен держать
             // поток вечно. После входа срок снимается — соединение
@@ -165,7 +183,7 @@ public class IrcServer implements AutoCloseable {
                 try {
                     raw = reader.next();
                 } catch (SocketTimeoutException e) {
-                    send(out, "ERROR :Слишком долго без регистрации");
+                    wire.write("ERROR :Слишком долго без регистрации");
                     break;
                 }
                 if (raw == null) {
@@ -174,7 +192,7 @@ public class IrcServer implements AutoCloseable {
                 if (raw == LineReader.TOO_LONG) {
                     // Строка длиннее предела протокола — не повод рвать
                     // соединение: клиент мог отправить длинное сообщение.
-                    send(out, ":" + IrcSession.SERVER + " 417 * :Строка длиннее "
+                    wire.write(":" + IrcSession.SERVER + " 417 * :Строка длиннее "
                             + IrcLine.MAX_BYTES + " байт");
                     continue;
                 }
@@ -183,11 +201,18 @@ public class IrcServer implements AutoCloseable {
                 try {
                     IrcSession.Reply reply = session.feed(IrcLine.parse(raw));
                     for (String line : reply.getLines()) {
-                        send(out, line);
+                        wire.write(line);
                     }
                     if (session.isRegistered() && token == null) {
                         token = session.getToken();
+                        userId = session.getUserId();
                         s.setSoTimeout(0);
+                        // Подписка на ленту — ТА ЖЕ, что у браузера.
+                        // Второй ответ на вопрос «чья это новость»
+                        // означал бы, что однажды в браузере новость
+                        // есть, а в канале её нет.
+                        listener = new IrcFeedListener(dataSource, wire);
+                        feed.subscribe(userId, listener);
                         log.info("IRC: вошёл {}", session.getNick());
                     }
                     if (reply.isClose()) {
@@ -200,6 +225,13 @@ public class IrcServer implements AutoCloseable {
         } catch (IOException e) {
             log.debug("IRC: соединение оборвалось", e);
         } finally {
+            // Отписка ЗДЕСЬ, а не по неудачной записи: рассылка узнаёт о
+            // смерти соединения только попыткой доставки, а этот поток
+            // знает о ней сразу. Не отпишись — список слушателей рос бы
+            // на каждое переподключение.
+            if (listener != null) {
+                feed.unsubscribe(userId, listener);
+            }
             // Сессия, открытая ради этого соединения, закрывается вместе
             // с ним. Иначе каждый обрыв оставлял бы живой токен, и
             // сессии копились бы у тех, кто просто переподключился.
