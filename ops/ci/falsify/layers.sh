@@ -43,4 +43,45 @@ replace_in "$TC" "  TcResult, TcStr;" "  TcResult, TcStr, TcNoSuchThing;"
 bash ./sonder check-layers > /tmp/f-layers-3.log 2>&1 \
   && { echo "  ЗЕЛЕНО ПРИ НЕИЗВЕСТНОМ МОДУЛЕ"; exit 1; }
 
-echo "  ввод-вывод в домене, ребро вверх и потерянный модуль ловятся"
+cp "$K2" "$TC"
+
+# --- достижимость от программы ----------------------------------------
+#
+# Две стороны, и обе обязаны краснеть. Модуль, ВЫПАВШИЙ из программы, —
+# это либо потерянное `uses`, либо новый мёртвый груз. Модуль,
+# ВЕРНУВШИЙСЯ в неё, делает объяснение в списке ложным, а список,
+# объясняющий уже не то, хуже отсутствующего.
+NODE="$ROOT/dosnode/src/node7.pas"
+K3="$(mktemp)"
+cp "$NODE" "$K3"
+restore_node() { cp "$K3" "$NODE"; rm -f "$K3"; }
+
+replace_in "$NODE" "  DcdTypes, DcdSrv, DmDecide;" "  DcdTypes, DcdSrv;"
+if bash ./sonder check-layers > /tmp/f-layers-4.log 2>&1; then
+  echo "  ЗЕЛЕНО, КОГДА МОДУЛЬ ВЫПАЛ ИЗ ПРОГРАММЫ"
+  restore_node
+  exit 1
+fi
+grep -aq "не входит в программу и не объявлен осознанно" /tmp/f-layers-4.log || {
+  echo "  упало не на достижимости"
+  restore_node
+  exit 1
+}
+cp "$K3" "$NODE"
+
+replace_in "$NODE" "  DcdTypes, DcdSrv, DmDecide;" \
+                   "  DcdTypes, DcdSrv, DmDecide, TcLog;"
+if bash ./sonder check-layers > /tmp/f-layers-5.log 2>&1; then
+  echo "  ЗЕЛЕНО, КОГДА ОБЪЯВЛЕННЫЙ НЕДОСТИЖИМЫМ ВЕРНУЛСЯ"
+  restore_node
+  exit 1
+fi
+grep -aq "объявлен недостижимым, но программа его использует" /tmp/f-layers-5.log || {
+  echo "  упало не на возвращении"
+  restore_node
+  exit 1
+}
+restore_node
+
+echo "  ввод-вывод в домене, ребро вверх, потерянный модуль и обе"
+echo "  стороны достижимости ловятся"
