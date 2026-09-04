@@ -165,6 +165,12 @@ cmd_codegen() {
 
   step "типы событий для веба"
   run_py python tools/gen-api-types/gen_events.py || return 1
+
+  # Разметка записи свода: копибук COBOL и писатель на Java. Разойдись
+  # они — программа прочитает мусор и не заметит: у файла фиксированной
+  # ширины нет ни разделителей, ни заголовков (ADR-0018).
+  step "разметка записи свода"
+  run_py python tools/gen-copybook/gen_copybook.py || return 1
 }
 
 # Сгенерированный код лежит в репозитории, чтобы его было видно на ревью.
@@ -533,6 +539,17 @@ cmd_falsify() {
   bash ops/ci/falsify/run.sh || return 1
 }
 
+# Ночной свод: выгрузка, пакет на COBOL, отчёт.
+#
+# Не в verify: требует поднятой базы и идёт секундами на тысячах
+# записей. Пакет по определению живёт своим расписанием (ADR-0018).
+cmd_report() {
+  need_docker
+  step "ночной свод"
+  docker image inspect sonder/report:1 > /dev/null 2>&1     || docker build -f ops/compose/Dockerfile.report -t sonder/report:1 .     || return 1
+  bash ops/ci/report.sh || return 1
+}
+
 cmd_soak() {
   ensure_dos
   step "фаззинг XML и кадров"
@@ -704,6 +721,7 @@ Sonder — цели
   timing               выдаёт ли время ответа существование ника
   check-shell          имена переменных в shell-скриптах
   falsify              проверка проверок: умеют ли они падать
+  report               ночной свод: выгрузка, пакет на COBOL, отчёт
   bench                нагрузочный профиль и графики насыщения
   down                 остановить и убрать
   clean                удалить сборочные артефакты
@@ -740,6 +758,7 @@ case "${1:-help}" in
   lag)                cmd_lag ;;
   timing)             cmd_timing ;;
   falsify)            cmd_falsify ;;
+  report)             cmd_report ;;
   bench)              cmd_bench ;;
   drain-bench)        shift; cmd_drain_bench "$@" ;;
   java)               shift; need_docker; cmd_java "$@" ;;
