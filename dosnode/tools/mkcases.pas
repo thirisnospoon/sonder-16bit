@@ -42,6 +42,7 @@ uses
 
 const
   OutName = 'createpost.tsv';
+  RegName = 'registeruser.tsv';
   MaxBody = 4200;
   RandomCases = 600;
   Seed0 = 20260904;
@@ -49,6 +50,8 @@ const
 var
   F: Text;
   Arena: TArena;
+  NickBuf: array[0..127] of Char;
+  NameBuf: array[0..511] of Char;
   Total: LongInt;
   Seed: LongInt;
   RC: TResult;
@@ -343,6 +346,215 @@ begin
   end;
 end;
 
+{ ===================================================================
+  Регистрация: правила другого рода.
+
+  У ника свой набор знаков, строже идентификатора; пустое и длинное
+  отображаемое имя дают ОДИН код, а неверная кодировка — отдельный.
+  =================================================================== }
+
+procedure SetNick(const S: string);
+var
+  I: Word;
+begin
+  for I := 1 to Length(S) do
+    NickBuf[I - 1] := S[I];
+end;
+
+procedure SetName(const S: string);
+var
+  I: Word;
+begin
+  for I := 1 to Length(S) do
+    NameBuf[I - 1] := S[I];
+end;
+
+procedure FillName(const Piece: string; Times: Word; var Len: Word);
+var
+  I, J: Word;
+begin
+  Len := 0;
+  for I := 1 to Times do
+    for J := 1 to Length(Piece) do
+    begin
+      if Len >= 511 then
+        Exit;
+      NameBuf[Len] := Piece[J];
+      Inc(Len);
+    end;
+end;
+
+procedure EmitReg(IdLen, NickLen, NameLen: Word; Taken: Boolean);
+var
+  Req: TRegisterUserRequest;
+  D: TDecision;
+  R: TResult;
+begin
+  ArenaReset(Arena);
+  FillChar(Req, SizeOf(Req), 0);
+
+  Req.command.userId.Ptr := @IdBuf[0];
+  Req.command.userId.Len := IdLen;
+  Req.command.nick.Ptr := @NickBuf[0];
+  Req.command.nick.Len := NickLen;
+  Req.command.displayName.Ptr := @NameBuf[0];
+  Req.command.displayName.Len := NameLen;
+  Req.nick.taken := Taken;
+
+  R := DecideRegisterUser(Arena, Req, D);
+  if not R.Ok then
+  begin
+    WriteLn('АРЕНА ОТКАЗАЛА на регистрации ', Total);
+    Halt(1);
+  end;
+
+  Inc(Total);
+  Write(F, Total, #9);
+  WriteHex(@IdBuf[0], IdLen);
+  Write(F, #9);
+  WriteHex(@NickBuf[0], NickLen);
+  Write(F, #9);
+  WriteHex(@NameBuf[0], NameLen);
+  if Taken then
+    Write(F, #9, 'yes')
+  else
+    Write(F, #9, 'no');
+  if D.accepted then
+    Write(F, #9, 'accepted', #9, '-')
+  else
+  begin
+    Write(F, #9, 'rejected', #9);
+    if StrIsEmpty(D.errorCode) then
+      Write(F, '-')
+    else
+      Write(F, StrHead(D.errorCode));
+  end;
+  WriteLn(F);
+end;
+
+procedure RegisterCases;
+var
+  Len: Word;
+begin
+  SetId('u-andrey');
+  SetNick('andrey');
+  SetName('Андрей');
+
+  { Исправный случай. }
+  EmitReg(8, 6, 12, False);
+  EmitReg(8, 6, 12, True);
+
+  { Идентификатор. }
+  EmitReg(0, 6, 12, False);
+  SetId('u andrey');
+  EmitReg(8, 6, 12, False);
+  SetId('u-andrey');
+
+  { Ник: границы длины и набор знаков. }
+  EmitReg(8, 0, 12, False);
+  SetNick('ab');
+  EmitReg(8, LIM_NICK_MIN_LEN - 1, 12, False);
+  SetNick('abc');
+  EmitReg(8, LIM_NICK_MIN_LEN, 12, False);
+  SetNick('abcdefghijklmnopqrst');
+  EmitReg(8, LIM_NICK_MAX_LEN, 12, False);
+  SetNick('abcdefghijklmnopqrstu');
+  EmitReg(8, LIM_NICK_MAX_LEN + 1, 12, False);
+  SetNick('Andrey');
+  EmitReg(8, 6, 12, False);
+  SetNick('u-andrey');
+  EmitReg(8, 8, 12, False);
+  SetNick('andrey_1');
+  EmitReg(8, 8, 12, False);
+  SetNick('андрей');
+  EmitReg(8, 12, 12, False);
+  SetNick('andrey');
+
+  { Отображаемое имя: пустое, пробельное, на границе и за ней. }
+  EmitReg(8, 6, 0, False);
+  SetName('   ');
+  EmitReg(8, 6, 3, False);
+  FillName('я', LIM_DISPLAY_NAME_MAX_LEN, Len);
+  EmitReg(8, 6, Len, False);
+  FillName('я', LIM_DISPLAY_NAME_MAX_LEN + 1, Len);
+  EmitReg(8, 6, Len, False);
+  FillName('a', LIM_DISPLAY_NAME_MAX_LEN + 1, Len);
+  EmitReg(8, 6, Len, False);
+
+  { Неверная кодировка в имени — отдельный код, не DISPLAY_NAME_INVALID. }
+  NameBuf[0] := #$C0; NameBuf[1] := #$AF;
+  EmitReg(8, 6, 2, False);
+  NameBuf[0] := #$ED; NameBuf[1] := #$A0; NameBuf[2] := #$80;
+  EmitReg(8, 6, 3, False);
+  NameBuf[0] := #$D0;
+  EmitReg(8, 6, 1, False);
+
+  { Приоритет: плохой ник побеждает плохое имя, а плохое имя — занятость. }
+  SetNick('AB');
+  NameBuf[0] := #$C0; NameBuf[1] := #$AF;
+  EmitReg(8, 2, 2, True);
+  SetNick('andrey');
+  EmitReg(8, 6, 2, True);
+  SetName('Андрей');
+  EmitReg(8, 6, 12, True);
+end;
+
+procedure RegisterRandom;
+const
+  NickAlpha: array[0..11] of Byte =
+    ($61, $7A, $30, $5F, $2D, $41, $20, $D0, $B0, $39, $6D, $C3);
+  NameAlpha: array[0..11] of Byte =
+    ($61, $20, $D0, $B0, $80, $C2, $ED, $A0, $F0, $90, $09, $7A);
+  { Только то, что законно в нике: нижний регистр, цифры, подчёркивание. }
+  GoodNick: array[0..7] of Byte =
+    ($61, $62, $7A, $30, $39, $5F, $6D, $71);
+var
+  N, I: Word;
+  NickLen, NameLen: Word;
+  Taken: Boolean;
+begin
+  for N := 1 to RandomCases do
+  begin
+    { Половина ников берётся из ЗАКОННОГО набора, половина из злого.
+      Без этого корпус вырождается: случайная строка из злого алфавита
+      почти всегда негодный ник, и остальные ветки — имя, занятость,
+      согласие — остаются непройденными. Замерено: 598 отказов по нику
+      из 624 случаев. }
+    if NextRand(2) = 0 then
+    begin
+      NickLen := LIM_NICK_MIN_LEN + NextRand(LIM_NICK_MAX_LEN
+                                             - LIM_NICK_MIN_LEN + 1);
+      for I := 0 to NickLen - 1 do
+        NickBuf[I] := Char(GoodNick[NextRand(8)]);
+    end
+    else
+    begin
+      NickLen := NextRand(24);
+      if NickLen > 0 then
+        for I := 0 to NickLen - 1 do
+          NickBuf[I] := Char(NickAlpha[NextRand(12)]);
+    end;
+
+    if NextRand(2) = 0 then
+    begin
+      NameLen := 1 + NextRand(12);
+      for I := 0 to NameLen - 1 do
+        NameBuf[I] := Char(GoodNick[NextRand(8)]);
+    end
+    else
+    begin
+      NameLen := NextRand(20);
+      if NameLen > 0 then
+        for I := 0 to NameLen - 1 do
+          NameBuf[I] := Char(NameAlpha[NextRand(12)]);
+    end;
+
+    Taken := NextRand(4) = 0;
+    SetId('u-andrey');
+    EmitReg(8, NickLen, NameLen, Taken);
+  end;
+end;
+
 begin
   WriteLn('mkcases: начали');
   Total := 0;
@@ -367,9 +579,23 @@ begin
   BoundaryCases;
   WriteLn('mkcases: случайные');
   RandomCasesRun;
-
   Close(F);
+  WriteLn('createpost: ', Total);
+
+  Total := 0;
+  Seed := Seed0;
+  Assign(F, RegName);
+  Rewrite(F);
+  WriteLn(F, '# порождено настоящим DecideRegisterUser; правится не здесь');
+  WriteLn(F, '# id', #9, 'userIdHex', #9, 'nickHex', #9, 'displayNameHex', #9,
+             'nickTaken', #9, 'verdict', #9, 'errorCode');
+  WriteLn(F, '# limits', #9, LIM_NICK_MIN_LEN, #9, LIM_NICK_MAX_LEN, #9,
+             LIM_DISPLAY_NAME_MAX_LEN);
+  RegisterCases;
+  RegisterRandom;
+  Close(F);
+  WriteLn('registeruser: ', Total);
+
   ArenaDestroy(Arena);
-  WriteLn('случаев записано: ', Total);
-  WriteLn('файл: ', OutName);
+  WriteLn('файлы: ', OutName, ' ', RegName);
 end.

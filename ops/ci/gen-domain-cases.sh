@@ -31,12 +31,17 @@ trap 'rm -rf "$WORK"' EXIT
   exit 1
 }
 
-MARK="изменён"
-if [ -f "$OUT" ] && cmp -s "$WORK/createpost.tsv" "$OUT"; then
-  MARK="без изменений"
-else
-  cp "$WORK/createpost.tsv" "$OUT"
-fi
-
-echo "  contracts/generated/domain/createpost.tsv  $MARK"
-sed -n 's/^случаев записано: /случаев: /p' "$WORK/log.txt"
+# Файлов несколько: по одному на операцию. Одна плоская таблица на все
+# семь потребовала бы колонок под контекст каждой — и половина строк
+# стояла бы пустой.
+for NAME in createpost registeruser; do
+  DEST="$OUT_DIR/$NAME.tsv"
+  MARK="изменён"
+  if [ -f "$DEST" ] && cmp -s "$WORK/$NAME.tsv" "$DEST"; then
+    MARK="без изменений"
+  else
+    cp "$WORK/$NAME.tsv" "$DEST"
+  fi
+  echo "  contracts/generated/domain/$NAME.tsv  $MARK"
+done
+grep -E '^(createpost|registeruser): ' "$WORK/log.txt" | sed 's/^/  случаев /' 

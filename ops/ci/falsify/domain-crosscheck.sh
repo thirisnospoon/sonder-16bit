@@ -3,10 +3,10 @@
 #
 # Согласие двух реализаций — сильное утверждение ровно настолько,
 # насколько сверка способна показать несогласие. Здесь во второе мнение
-# по одному вносятся дефекты трёх разных родов, и каждый обязан
+# по одному вносятся дефекты четырёх разных родов, и каждый обязан
 # покраснеть.
 #
-# Все три — настоящие ошибки понимания правил, а не опечатки:
+# Все четыре — настоящие ошибки понимания правил, а не опечатки:
 #
 #   1. ПЕРЕПУТАН ПРИОРИТЕТ. Проверка текста раньше проверки статуса.
 #      Заблокированный с пустым постом получит POST_BODY_EMPTY вместо
@@ -15,26 +15,38 @@
 #
 #   2. ОСЛАБЛЕН РАЗБОР UTF-8. Снята проверка суррогатов: D800..DFFF
 #      начинают считаться законными знаками. Это самая частая ошибка в
-#      рукописных разборщиках UTF-8 — и самая тихая.
+#      рукописных разборщиках UTF-8 — и самая тихая. Правило общее, и
+#      дефект обязан покраснеть на ОБЕИХ операциях.
 #
 #   3. СДВИНУТ ПРЕДЕЛ НА ЕДИНИЦУ. Строгое сравнение вместо нестрогого в
 #      пределе частоты: двадцатый пост за час проходит.
+#
+#   4. НИК ПРОВЕРЯЕТСЯ КАК ИДЕНТИФИКАТОР. Набор знаков у них разный:
+#      дефис законен в идентификаторе и незаконен в нике. Реализация,
+#      взявшая одну проверку на оба, примет «u-andrey» за ник.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-RULES="$ROOT/dosnode/prolog/createpost.pl"
-KEEP="$(mktemp)"
+POST="$ROOT/dosnode/prolog/createpost.pl"
+COMMON="$ROOT/dosnode/prolog/rules.pl"
+KEEP_POST="$(mktemp)"
+KEEP_COMMON="$(mktemp)"
 
 cd "$ROOT" || exit 1
 
-cp "$RULES" "$KEEP"
-trap 'cp "$KEEP" "$RULES"; rm -f "$KEEP"' EXIT
+cp "$POST" "$KEEP_POST"
+cp "$COMMON" "$KEEP_COMMON"
+restore() {
+  cp "$KEEP_POST" "$POST"
+  cp "$KEEP_COMMON" "$COMMON"
+}
+trap 'restore; rm -f "$KEEP_POST" "$KEEP_COMMON"' EXIT
 
 bash ops/ci/domain-crosscheck.sh > /tmp/f-dom-0.log 2>&1 \
   || { echo "  БАЗА КРАСНАЯ"; sed -n '$p' /tmp/f-dom-0.log; exit 1; }
 
 # --- 1. Приоритет: текст раньше статуса -------------------------------
-python3 - "$RULES" <<'PY'
+python3 - "$POST" <<'PY'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
@@ -54,21 +66,29 @@ bash ops/ci/domain-crosscheck.sh > /tmp/f-dom-1.log 2>&1 \
   && { echo "  ЗЕЛЕНО ПРИ ПЕРЕПУТАННОМ ПРИОРИТЕТЕ"; exit 1; }
 grep -aq "случай" /tmp/f-dom-1.log \
   || { echo "  упало, но не на расхождении случаев"; exit 1; }
-cp "$KEEP" "$RULES"
+restore
 
 # --- 2. Суррогаты объявлены законными ---------------------------------
-sed -i 's/;  B =:= 0xED -> B2 =< 0x9F/;  B =:= 0xED -> true/' "$RULES"
-grep -q "B =:= 0xED -> true" "$RULES" \
+sed -i 's/;  B =:= 0xED -> B2 =< 0x9F/;  B =:= 0xED -> true/' "$COMMON"
+grep -q "B =:= 0xED -> true" "$COMMON" \
   || { echo "  ДЕФЕКТ НЕ ВНЕСЁН: разбор UTF-8 изменился"; exit 1; }
 bash ops/ci/domain-crosscheck.sh > /tmp/f-dom-2.log 2>&1 \
   && { echo "  ЗЕЛЕНО, КОГДА СУРРОГАТЫ СЧИТАЮТСЯ ЗАКОННЫМИ"; exit 1; }
-cp "$KEEP" "$RULES"
+restore
 
 # --- 3. Предел частоты сдвинут на единицу -----------------------------
-sed -i "s/    Posts >= Rate, !\./    Posts > Rate, !./" "$RULES"
-grep -q "Posts > Rate" "$RULES" \
+sed -i "s/    Posts >= Rate, !\./    Posts > Rate, !./" "$POST"
+grep -q "Posts > Rate" "$POST" \
   || { echo "  ДЕФЕКТ НЕ ВНЕСЁН: правило предела изменилось"; exit 1; }
 bash ops/ci/domain-crosscheck.sh > /tmp/f-dom-3.log 2>&1 \
   && { echo "  ЗЕЛЕНО ПРИ СДВИНУТОМ НА ЕДИНИЦУ ПРЕДЕЛЕ"; exit 1; }
+restore
 
-echo "  приоритет, суррогаты и предел на единицу ловятся"
+# --- 4. Дефис объявлен законным в нике --------------------------------
+sed -i "s/^lower_alnum(0'_)\./lower_alnum(0'_).\nlower_alnum(0'-)./" "$COMMON"
+grep -q "lower_alnum(0'-)" "$COMMON" \
+  || { echo "  ДЕФЕКТ НЕ ВНЕСЁН: набор знаков ника изменился"; exit 1; }
+bash ops/ci/domain-crosscheck.sh > /tmp/f-dom-4.log 2>&1 \
+  && { echo "  ЗЕЛЕНО, КОГДА ДЕФИС ЗАКОНЕН В НИКЕ"; exit 1; }
+
+echo "  приоритет, суррогаты, предел на единицу и набор знаков ника ловятся"
