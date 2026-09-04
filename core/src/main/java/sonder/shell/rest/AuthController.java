@@ -9,8 +9,7 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import sonder.contract.ErrorCode;
-import sonder.shell.auth.LoginAttempts;
-import sonder.shell.auth.Passwords;
+import sonder.shell.auth.Login;
 import sonder.shell.auth.SessionStore;
 
 import javax.servlet.http.HttpServletResponse;
@@ -38,15 +37,14 @@ import java.util.Map;
  * <p>При неизвестном нике пароль всё равно проверяется — против
  * фиктивного хэша. Иначе ответ приходил бы заметно быстрее, и время
  * ответа сообщало бы то же самое, что и разные коды.
+ *
+ * <p><b>Сама проверка живёт в {@link sonder.shell.auth.Login},</b> потому
+ * что вход спрашивает не один транспорт: у шлюза IRC своя аутентификация
+ * и тот же вопрос. Здесь остаётся перевод исхода на язык HTTP — код
+ * ответа и кука.
  */
 @RestController
 public class AuthController {
-
-    /**
-     * Хэш, против которого проверяется пароль несуществующего
-     * пользователя. Нужен ровно затем, чтобы обе ветки стоили одинаково.
-     */
-    private static final String DUMMY_HASH = Passwords.hash("нет такого пользователя");
 
     private final DataSource dataSource;
 
@@ -126,51 +124,21 @@ public class AuthController {
         String nick = request == null ? null : request.getNick();
         String password = request == null ? null : request.getPassword();
 
+        // Сама проверка — в sonder.shell.auth.Login: её спрашивает не
+        // один транспорт. Здесь остаётся ровно перевод исхода на язык
+        // HTTP, и это всё, что вход знает о HTTP.
         try (Connection c = dataSource.getConnection()) {
-            Instant now = Instant.now();
-
-            // ПРЕДЕЛ СПРАШИВАЕТСЯ ДО ПРОВЕРКИ ПАРОЛЯ. Спроси мы после —
-            // предел не мешал бы подбору, а лишь сообщал о нём, когда
-            // очередная попытка уже состоялась.
-            if (LoginAttempts.tooMany(c, nick, now)) {
-                return RestErrors.of(ErrorCode.LOGIN_RATE_EXCEEDED, traceId);
+            Login.Outcome outcome = Login.attempt(c, nick, password, Instant.now());
+            switch (outcome.getResult()) {
+                case RATE_EXCEEDED:
+                    return RestErrors.of(ErrorCode.LOGIN_RATE_EXCEEDED, traceId);
+                case INVALID:
+                    return RestErrors.of(ErrorCode.CREDENTIALS_INVALID, traceId);
+                default:
+                    SessionCookie.issue(response, outcome.getToken(),
+                            cookieSecure, cookieMaxAge);
+                    return ResponseEntity.noContent().build();
             }
-
-            String userId = null;
-            String hash = DUMMY_HASH;
-
-            if (nick != null) {
-                try (PreparedStatement ps = c.prepareStatement(
-                        "SELECT id, password_hash FROM users"
-                                + " WHERE LOWER(nick) = LOWER(?) AND status = 'ACTIVE'")) {
-                    ps.setString(1, nick);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        if (rs.next()) {
-                            userId = rs.getString(1);
-                            hash = rs.getString(2);
-                        }
-                    }
-                }
-            }
-
-            // Проверка идёт ВСЕГДА, даже когда пользователя нет: иначе
-            // время ответа выдало бы существование ника.
-            boolean ok = Passwords.matches(password, hash) && userId != null;
-            if (!ok) {
-                // Записывается попытка по ЛЮБОМУ нику, существующему или
-                // нет: считать только существующие значило бы завести
-                // оракул перебора — несуществующий ник отвечал бы вечно,
-                // существующий упирался бы в предел.
-                LoginAttempts.record(c, nick, now);
-                return RestErrors.of(ErrorCode.CREDENTIALS_INVALID, traceId);
-            }
-
-            // Предел защищает от подбора, а не наказывает за опечатку:
-            // вспомнивший пароль не должен ждать окончания окна.
-            LoginAttempts.clear(c, nick);
-            String token = SessionStore.open(c, userId, now);
-            SessionCookie.issue(response, token, cookieSecure, cookieMaxAge);
-            return ResponseEntity.noContent().build();
         }
     }
 
