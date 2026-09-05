@@ -44,10 +44,11 @@ The check caught its own author on the first run doing otherwise.
 
 **Cyrillic is banned; multibyte is not.** The oldest defect class here is
 bytes mistaken for characters, and every test that catches it needs
-MULTIBYTE fixtures. Turning `Андрей` into `Andrew` makes those tests pass
-for the wrong reason -- in ASCII a byte is a character. Fixtures become
-Greek, Japanese or accented Latin, and the expected byte counts are
-recomputed. Files where this matters:
+MULTIBYTE fixtures. Turning a two-byte-per-letter name into an ASCII one
+makes those tests pass for the wrong reason: there a byte IS a character,
+and nothing is left to confuse. Fixtures become Greek, Japanese or
+accented Latin, and the expected byte counts are recomputed with them.
+Files where this matters:
 
 * `report/test/make-fixture.py` and `ops/ci/report-test.sh` -- the digest
   golden numbers (367 bytes / 217 characters / 1.69 bytes per character)
@@ -64,9 +65,10 @@ directly is undone by the next `./sonder codegen` and caught by
 `check-drift`. Translate `contracts/**`, regenerate, commit both.
 
 **One shim exists and must be removed at the end.** `cmd_check_drift` in
-`sonder` accepts both `изменён|без изменений` and `changed|unchanged`,
-because generators cross over one at a time. When the last Russian
-generator is gone, drop the Russian half.
+`sonder` accepts both the Russian and the English spelling of a
+generator's verdict line, because generators cross over one at a time and
+a pattern knowing only one of the two would silently stop seeing half the
+files. When the last Russian generator is gone, drop the Russian half.
 
 ### Suggested order of areas
 
