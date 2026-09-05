@@ -237,6 +237,7 @@ cmd_verify() {
   local rc=0
   cmd_check_eol           || rc=1
   cmd_check_shell         || rc=1
+  cmd_check_language      || rc=1
   cmd_contracts           || rc=1
   cmd_contracts_selftest  || rc=1
   cmd_check_drift         || rc=1
@@ -561,6 +562,22 @@ cmd_check_shell() {
   run_py python ops/ci/check-shell.py
 }
 
+# The project speaks English. This check is the ratchet that keeps it
+# that way while the translation is under way.
+#
+# ops/ci/language-baseline.tsv records how many lines still hold Cyrillic
+# per file, and the number must equal reality in BOTH directions. More
+# means Russian was added; fewer means something was translated and the
+# baseline was not tightened -- and a ratchet nobody tightens permits
+# putting Russian back, up to the old number, in silence.
+#
+# Tightened explicitly:  ./sonder check-language --update
+cmd_check_language() {
+  ensure_py
+  step "project language"
+  run_py python ops/ci/check-language.py "$@"
+}
+
 cmd_falsify() {
   need_docker
   step "проверка проверок"
@@ -818,6 +835,7 @@ Sonder — цели
   lag                  лаг read-model: от «принято» до «видно в ленте»
   timing               выдаёт ли время ответа существование ника
   check-shell          имена переменных в shell-скриптах
+  check-language       no Russian in the project; --update tightens the ratchet
   falsify              проверка проверок: умеют ли они падать
   falsify-slow         то же плюс требующие образа и состава
   report               ночной свод: выгрузка, пакет на COBOL, отчёт
@@ -841,6 +859,7 @@ case "${1:-help}" in
   verify)             cmd_verify ;;
   check-eol)          cmd_check_eol ;;
   check-shell)        need_docker; cmd_check_shell ;;
+  check-language)     need_docker; shift; cmd_check_language "$@" ;;
   contracts)          need_docker; cmd_contracts ;;
   contracts-selftest) need_docker; cmd_contracts_selftest ;;
   codegen)            need_docker; cmd_codegen ;;

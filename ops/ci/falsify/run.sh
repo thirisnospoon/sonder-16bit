@@ -64,6 +64,7 @@ run_one() {
 FAST=(
   "eol.sh|переводы строк"
   "shell.sh|идентификаторы в bash"
+  "language.sh|language ratchet"
   "budgets.sh|бюджеты TURBOCORE §12"
   "layers.sh|граф модулей Pascal"
   "restart.sh|политика перезапуска"

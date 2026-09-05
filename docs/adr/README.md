@@ -27,3 +27,4 @@
 | [0020](0020-digest-on-a-schedule.md) | Ночной свод считается по расписанию, своей службой, по UTC — уточняет 0018 | Принято |
 | [0021](0021-irc-gateway.md) | Второй транспорт — шлюз IRC, а не Gopher или Finger | Принято |
 | [0022](0022-domain-second-opinion.md) | Доменные правила проверяет второе мнение — на Прологе | Принято |
+| [0023](0023-english-only.md) | The project speaks English; a ratchet keeps it that way | Accepted |
