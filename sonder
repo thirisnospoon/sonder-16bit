@@ -208,8 +208,13 @@ cmd_check_drift() {
   local line
   while IFS= read -r line; do
     [ -n "$line" ] && files+=("$line")
+  # Both spellings while the move to English is under way: generators
+  # cross over one at a time, and a pattern that knew only one of the two
+  # would silently stop seeing half the files. A drift check that sees
+  # nothing is green and means nothing. The Russian half goes with the
+  # last Russian generator (ADR-0023).
   done < <(echo "$out" |
-           sed -n 's/^  \([^ ].*\)  \(изменён\|без изменений\)$/\1/p')
+           sed -n 's/^  \([^ ].*\)  \(изменён\|без изменений\|changed\|unchanged\)$/\1/p')
 
   # Проверка, которой нечего сверять, зелена всегда и не значит ничего.
   if [ "${#files[@]}" -eq 0 ]; then

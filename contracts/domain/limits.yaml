@@ -1,13 +1,14 @@
-# Числовые границы домена.
+# Numeric limits of the domain.
 #
-# Источник правды. Из этого файла генерируются:
-#   * Pascal — dosnode/src/generated/dmlimits.inc, где границы применяются;
-#   * проверка соответствия OpenAPI: maxLength в описании веб-контракта
-#     обязан совпадать, иначе клиент подскажет пользователю одно, а ядро
-#     решит по другому.
+# The source of truth. Generated from this file:
+#   * Pascal -- dosnode/src/generated/dmlimits.inc, where the limits are
+#     enforced;
+#   * a conformance check against OpenAPI: maxLength in the web contract
+#     must match, or the client hints one thing to the user and the core
+#     refuses on another.
 #
-# Границы живут здесь, а не в OpenAPI, потому что решает их ядро. В
-# веб-контракте они присутствуют только как подсказка для интерфейса.
+# The limits live here rather than in OpenAPI because the core decides
+# them. In the web contract they appear only as a hint for the interface.
 
 version: 1
 
@@ -15,39 +16,39 @@ limits:
 
   nick_min_len:
     value: 3
-    description: "Минимальная длина ника"
+    description: "Shortest nick"
     openapi_pattern: "^[a-z0-9_]{3,20}$"
 
   nick_max_len:
     value: 20
-    description: "Максимальная длина ника"
+    description: "Longest nick"
 
   display_name_max_len:
     value: 60
-    description: "Максимальная длина отображаемого имени"
+    description: "Longest display name"
     openapi: "RegisterRequest.displayName.maxLength"
 
   post_body_max_len:
     value: 1000
-    description: "Максимальная длина тела поста"
+    description: "Longest post body"
     openapi: "CreatePostRequest.body.maxLength"
 
   comment_body_max_len:
     value: 500
-    description: "Максимальная длина тела комментария"
+    description: "Longest comment body"
 
   ban_reason_max_len:
     value: 200
-    description: "Максимальная длина причины блокировки"
+    description: "Longest ban reason"
     openapi: "BanRequest.reason.maxLength"
 
   posts_per_hour:
     value: 20
     description: >
-      Сколько постов один пользователь может создать за час. Считает
-      оболочка и присылает счётчик в состоянии: у ядра нет ни базы,
-      ни часов.
+      How many posts one user may create in an hour. Counted by the
+      shell and sent to the core in the actor context: the core has
+      neither a database nor a clock.
 
   comments_per_hour:
     value: 60
-    description: "Сколько комментариев за час"
+    description: "How many comments in an hour"

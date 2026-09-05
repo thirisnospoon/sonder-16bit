@@ -1,28 +1,29 @@
-{ СГЕНЕРИРОВАНО. Не править руками.
+{ GENERATED. Do not edit by hand.
 
-  Источник: contracts/domain/limits.yaml
-  Генератор: tools/gen-limits/gen_limits.py
-  Перегенерация: ./sonder codegen
+  Source:      contracts/domain/limits.yaml
+  Generator:   tools/gen-limits/gen_limits.py
+  Regenerate:  ./sonder codegen
 }
 
-{ Границы домена. Применяются ядром — здесь они не подсказка,
-  а правило: превышение даёт отказ с кодом из errors.yaml. }
+{ Domain limits. Enforced by the core -- here they are not a
+  hint but a rule: exceeding one is a refusal carrying a code
+  from errors.yaml. }
 
 const
-  { Минимальная длина ника }
+  { Shortest nick }
   LIM_NICK_MIN_LEN             = 3;
-  { Максимальная длина ника }
+  { Longest nick }
   LIM_NICK_MAX_LEN             = 20;
-  { Максимальная длина отображаемого имени }
+  { Longest display name }
   LIM_DISPLAY_NAME_MAX_LEN     = 60;
-  { Максимальная длина тела поста }
+  { Longest post body }
   LIM_POST_BODY_MAX_LEN        = 1000;
-  { Максимальная длина тела комментария }
+  { Longest comment body }
   LIM_COMMENT_BODY_MAX_LEN     = 500;
-  { Максимальная длина причины блокировки }
+  { Longest ban reason }
   LIM_BAN_REASON_MAX_LEN       = 200;
-  { Сколько постов один пользователь может создать за час. Считает оболочка и присылает счётчик в состоянии: у ядра нет ни базы, ни часов. }
+  { How many posts one user may create in an hour. Counted by the shell and sent to the core in the actor context: the core has neither a database nor a clock. }
   LIM_POSTS_PER_HOUR           = 20;
-  { Сколько комментариев за час }
+  { How many comments in an hour }
   LIM_COMMENTS_PER_HOUR        = 60;
 

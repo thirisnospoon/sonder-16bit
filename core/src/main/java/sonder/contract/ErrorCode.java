@@ -20,91 +20,91 @@ package sonder.contract;
  */
 public enum ErrorCode {
 
-    /** Ник не соответствует [a-z0-9_]{3,20} */
+    /** The nick does not match [a-z0-9_]{3,20} */
     NICK_FORMAT_INVALID(Category.VALIDATION, 400, false, true),
-    /** Тело поста пустое или состоит из пробельных символов */
+    /** The post body is empty or nothing but whitespace */
     POST_BODY_EMPTY(Category.VALIDATION, 400, false, true),
-    /** Тело поста длиннее допустимого */
+    /** The post body is longer than allowed */
     POST_BODY_TOO_LONG(Category.VALIDATION, 400, false, true),
-    /** Тело комментария пустое */
+    /** The comment body is empty */
     COMMENT_BODY_EMPTY(Category.VALIDATION, 400, false, true),
-    /** Тело комментария длиннее допустимого */
+    /** The comment body is longer than allowed */
     COMMENT_BODY_TOO_LONG(Category.VALIDATION, 400, false, true),
-    /** Причина блокировки обязательна: она попадает в аудит */
+    /** A ban reason is required: it goes into the audit trail */
     BAN_REASON_EMPTY(Category.VALIDATION, 400, false, true),
-    /** Причина блокировки длиннее допустимого */
+    /** The ban reason is longer than allowed */
     BAN_REASON_TOO_LONG(Category.VALIDATION, 400, false, true),
-    /** Отображаемое имя пустое или длиннее допустимого */
+    /** The display name is empty or longer than allowed */
     DISPLAY_NAME_INVALID(Category.VALIDATION, 400, false, true),
-    /** Свободный текст не является корректным UTF-8. Ядро считает длину в символах, а испорченную последовательность посчитать нельзя, поэтому отказ выносится раньше проверки длины. В норме недостижим: байты порождает Java, а линия защищена CRC-16. */
+    /** Free text is not valid UTF-8. The core counts length in characters, and a broken sequence cannot be counted, so the refusal comes before the length check. Unreachable in normal operation: the bytes are produced by Java and the line is guarded by CRC-16. */
     TEXT_ENCODING_INVALID(Category.VALIDATION, 400, false, true),
-    /** Запрос не соответствует форме, объявленной в OpenAPI: нет тела, нет обязательного поля, поле не того типа. Решает оболочка, и это не пересечение с доменом: ядро проверяет СМЫСЛ команды — длину текста, права, частоту, — а здесь речь о том, что команду не удалось даже собрать. Отсутствующее тело запроса не «неверное отображаемое имя», и отвечать доменным кодом на него значило бы сказать пользователю неправду о том, что он сделал не так. */
+    /** The request does not match the shape declared in OpenAPI: no body, a missing required field, a field of the wrong type. Decided by the shell, and this is no overlap with the domain: the core checks the MEANING of a command -- text length, permissions, rate -- while this is about a command that could not even be assembled. A missing request body is not "an invalid display name", and answering it with a domain code would tell the user something untrue about what they got wrong. */
     MALFORMED_REQUEST(Category.VALIDATION, 400, false, false),
-    /** Сессия не найдена, истекла или отозвана */
+    /** The session is unknown, expired or revoked */
     SESSION_INVALID(Category.AUTH, 401, false, false),
-    /** Неверная пара логин и пароль */
+    /** Wrong name and password */
     CREDENTIALS_INVALID(Category.AUTH, 401, false, false),
-    /** Заблокированный пользователь не создаёт содержимое */
+    /** A banned user creates no content */
     ACTOR_BANNED(Category.PERMISSION, 403, false, true),
-    /** Действие доступно только владельцу объекта */
+    /** The action belongs to the owner of the object */
     NOT_OWNER(Category.PERMISSION, 403, false, true),
-    /** Роль не даёт права на это действие */
+    /** The role does not carry the right to this action */
     ROLE_INSUFFICIENT(Category.PERMISSION, 403, false, true),
-    /** Модератор не применяет меры к равному или старшему по роли */
+    /** A moderator does not act against an equal or a senior */
     CANNOT_MODERATE_PEER(Category.PERMISSION, 403, false, true),
-    /** Пользователь не существует */
+    /** No such user */
     USER_NOT_FOUND(Category.NOT_FOUND, 404, false, true),
-    /** Пост не существует */
+    /** No such post */
     POST_NOT_FOUND(Category.NOT_FOUND, 404, false, true),
-    /** Запрошенного объекта нет или он не виден. Отдельный код, а не POST_NOT_FOUND, потому что это РАЗНЫЕ решения, принимаемые разными сторонами. POST_NOT_FOUND выносит ядро при обработке КОМАНДЫ: команда ссылается на пост, которого нет или который удалён, и это доменный отказ. RESOURCE_NOT_FOUND выносит оболочка при ЧТЕНИИ: ядро в чтении не участвует вовсе, читать — не решать. Смыслы у кодов уже разные (ядро отвечает POST_NOT_FOUND и на удалённый пост тоже), и один код на два решения означал бы, что изменение в ядре тихо поменяет поведение чтения. Различие нашёл гейт ArchUnit на первой же попытке оболочки воспользоваться чужим кодом. */
+    /** The requested object is absent or not visible. A separate code from POST_NOT_FOUND, because these are DIFFERENT decisions taken by different sides. POST_NOT_FOUND is the core's, handling a COMMAND: the command refers to a post that does not exist or was deleted, and that is a domain refusal. RESOURCE_NOT_FOUND is the shell's, handling a READ: the core takes no part in reading at all -- reading is not deciding. The two codes already mean different things (the core answers POST_NOT_FOUND for a deleted post as well), and one code for two decisions would mean a change in the core quietly altering the behaviour of reads. The distinction was found by the ArchUnit gate on the shell's very first attempt to borrow a code that was not its own. */
     RESOURCE_NOT_FOUND(Category.NOT_FOUND, 404, false, false),
-    /** Ник уже занят */
+    /** The nick is already taken */
     NICK_TAKEN(Category.CONFLICT, 409, false, true),
-    /** Нельзя подписаться на себя */
+    /** One cannot follow oneself */
     SELF_FOLLOW(Category.CONFLICT, 409, false, true),
-    /** Подписка уже существует */
+    /** The subscription already exists */
     ALREADY_FOLLOWING(Category.CONFLICT, 409, false, true),
-    /** Отписаться нельзя: подписки нет. Зеркало ALREADY_FOLLOWING, и появился код вместе с операцией UnfollowUser. Отписка от себя приходит сюда же, а не в SELF_FOLLOW: подписаться на себя нельзя, значит и подписки на себя не бывает, и «вы не подписаны» — точное описание, а не подмена. */
+    /** Nothing to unfollow: there is no subscription. The mirror of ALREADY_FOLLOWING, and it appeared together with the UnfollowUser operation. Unfollowing oneself lands here rather than in SELF_FOLLOW: one cannot follow oneself, so a subscription to oneself never exists, and "you are not following" is an exact description rather than a substitute. */
     NOT_FOLLOWING(Category.CONFLICT, 409, false, true),
-    /** Пользователь уже заблокирован */
+    /** The user is already banned */
     ALREADY_BANNED(Category.CONFLICT, 409, false, true),
-    /** Состояние изменилось между загрузкой и сохранением, команду надо переиграть */
+    /** The state changed between load and save; the command must be replayed */
     STATE_VERSION_CONFLICT(Category.CONFLICT, 409, true, false),
-    /** Превышено число постов за окно */
+    /** Too many posts within the window */
     POST_RATE_EXCEEDED(Category.RATE_LIMIT, 429, true, true),
-    /** Превышено число комментариев за окно */
+    /** Too many comments within the window */
     COMMENT_RATE_EXCEEDED(Category.RATE_LIMIT, 429, true, true),
-    /** Слишком много попыток входа */
+    /** Too many login attempts */
     LOGIN_RATE_EXCEEDED(Category.RATE_LIMIT, 429, true, false),
-    /** Доменное ядро недоступно или не ответило в срок */
+    /** The domain core is unreachable or did not answer in time */
     DECIDER_UNAVAILABLE(Category.UPSTREAM, 502, true, false),
-    /** Ядру не хватило данных для решения: оболочка прислала не всё, что объявлено контрактом. Ядро обязано вернуть этот код, а не додумывать значение по умолчанию. Это дефект, а не пользовательская ошибка. */
+    /** The core lacked the data to decide: the shell sent less than the contract declares. The core must return this code rather than invent a default. It is a defect, not a user error. */
     INSUFFICIENT_CONTEXT(Category.INTERNAL, 500, false, true),
-    /** Файбер обработки команды упал, арена сброшена, нода жива */
+    /** The command fiber crashed, the arena was reset, the node lives */
     DECIDER_PANIC(Category.INTERNAL, 500, false, true),
-    /** Конверт SOAP не разобрался: нарушена структура XML, превышен предел разборщика или встретился DTD, который ядро отвергает намеренно. Снаружи все эти случаи неразличимы — конверт не разобрался, — а разница нужна только в логе, поэтому код один. Это дефект оболочки или порча на линии, а не пользовательская ошибка. */
+    /** The SOAP envelope did not parse: broken XML structure, a parser limit exceeded, or a DTD the core refuses on purpose. From outside these cases are indistinguishable -- the envelope did not parse -- and the difference matters only in the log, so there is one code. It is a defect of the shell or damage on the line, not a user error. */
     MALFORMED_ENVELOPE(Category.INTERNAL, 500, false, true),
-    /** Оболочка не справилась сама: необработанное исключение, отказ базы, неизвестный маршрут под /api. Код нужен потому, что ДО НЕГО таких ответов не было в контракте вовсе — Spring отдавал свою страницу ошибки с полями timestamp/status/error/path, и клиент, разбирающий объявленный ApiError, спотыкался ровно там, где нужнее всего понять причину. Отдельный от INSUFFICIENT_CONTEXT и DECIDER_PANIC: те объявляют дефект ЯДРА, а этот — дефект оболочки. Один код на двоих означал бы, что по ответу нельзя понять, в какой половине системы искать. */
+    /** The shell failed on its own: an unhandled exception, a database failure, an unknown route under /api. The code exists because BEFORE IT such answers were not in the contract at all -- Spring served its own error page with timestamp/status/error/path, and a client parsing the declared ApiError stumbled exactly where the cause matters most. Separate from INSUFFICIENT_CONTEXT and DECIDER_PANIC: those declare a defect of the CORE, this one a defect of the shell. One code for both would mean the answer cannot tell you which half of the system to search. */
     INTERNAL_ERROR(Category.INTERNAL, 500, false, false),
-    /** До оболочки не дошёл запрос: она перезапускается, упала или недоступна по сети. Отвечает при этом шлюз — сама оболочка молчит, и следа `trace_id` не существует, потому что рождается он у неё. ОТДЕЛЬНЫЙ ОТ DECIDER_UNAVAILABLE, и разница не формальная: тот означает, что не отвечает ЯДРО за последовательной линией, а этот — что не отвечает оболочка. Один код на двоих отправлял бы искать неисправность в шестнадцатибитной программе под эмулятором, когда на самом деле не поднялась Java. Повторять осмысленно: перезапуск оболочки занимает секунды. */
+    /** The request never reached the shell: it is restarting, crashed, or unreachable over the network. The answer comes from the gateway -- the shell itself is silent, and no `trace_id` exists, because that is born there. SEPARATE FROM DECIDER_UNAVAILABLE, and the difference is not formal: that one means the CORE behind the serial line is not answering, this one that the shell is not. One code for both would send you looking for the fault in a sixteen-bit program under an emulator when in fact Java failed to come up. Worth retrying: restarting the shell takes seconds. */
     GATEWAY_UNAVAILABLE(Category.UPSTREAM, 502, true, false);
 
     public enum Category {
-        /** Команда не проходит проверку формы */
+        /** The command fails a check of form */
         VALIDATION,
-        /** Не удалось установить личность */
+        /** Identity could not be established */
         AUTH,
-        /** Личность установлена, но действие не разрешено */
+        /** Identity established, action not allowed */
         PERMISSION,
-        /** Объект не существует */
+        /** The object does not exist */
         NOT_FOUND,
-        /** Состояние не допускает этого действия */
+        /** The state does not admit this action */
         CONFLICT,
-        /** Превышено ограничение частоты */
+        /** A rate limit was exceeded */
         RATE_LIMIT,
-        /** Отказала зависимость */
+        /** A dependency failed */
         UPSTREAM,
-        /** Дефект системы */
+        /** A defect of the system */
         INTERNAL;
     }
 

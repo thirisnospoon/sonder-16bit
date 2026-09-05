@@ -1,13 +1,13 @@
 /*
- * СГЕНЕРИРОВАНО. Не править руками.
+ * GENERATED. Do not edit by hand.
  *
- * Источник: contracts/domain/limits.yaml
- * Генератор: tools/gen-limits/gen_limits.py
- * Перегенерация: ./sonder codegen
+ * Source:      contracts/domain/limits.yaml
+ * Generator:   tools/gen-limits/gen_limits.py
+ * Regenerate:  ./sonder codegen
  */
 
-// Подсказка для интерфейса, а не правило: решение всё равно
-// принимает ядро. Проверка на клиенте — удобство пользователя.
+// A hint for the interface, not a rule: the decision is the
+// core's either way. Checking here is a courtesy to the user.
 export const LIMITS = {
   nickMinLen: 3,
   nickMaxLen: 20,

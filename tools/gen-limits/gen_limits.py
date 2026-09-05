@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Генерация числовых границ домена из contracts/domain/limits.yaml.
+Generate the numeric domain limits from contracts/domain/limits.yaml.
 
-Границы решает ядро, поэтому они живут в контракте домена, а не в OpenAPI.
-В веб-контракте те же числа присутствуют как подсказка для интерфейса, и
-расхождение между ними — это ситуация, где клиент подсказывает пользователю
-одно, а ядро отказывает по другому. Валидатор контрактов сверяет их
-отдельной проверкой.
+The limits are decided by the core, so they live in the domain contract
+rather than in OpenAPI. The same numbers appear in the web contract as a
+hint for the interface, and a disagreement between the two is exactly the
+situation where the client tells the user one thing and the core refuses
+on another. The contract validator compares them in a check of its own.
 
-Цели:
-  Pascal — dosnode/src/generated/dmlimits.inc, где границы применяются;
-  TS     — web/src/generated/limits.ts, где они подсказывают интерфейсу.
+Targets:
+  Pascal -- dosnode/src/generated/dmlimits.inc, where the limits bite;
+  TS     -- web/src/generated/limits.ts, where they only hint.
 """
 
 from __future__ import annotations
@@ -21,18 +21,18 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("нужен pyyaml", file=sys.stderr)
+    print("pyyaml is required", file=sys.stderr)
     sys.exit(64)
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "contracts" / "domain" / "limits.yaml"
 
 BANNER = [
-    "СГЕНЕРИРОВАНО. Не править руками.",
+    "GENERATED. Do not edit by hand.",
     "",
-    "Источник: contracts/domain/limits.yaml",
-    "Генератор: tools/gen-limits/gen_limits.py",
-    "Перегенерация: ./sonder codegen",
+    "Source:      contracts/domain/limits.yaml",
+    "Generator:   tools/gen-limits/gen_limits.py",
+    "Regenerate:  ./sonder codegen",
 ]
 
 
@@ -51,8 +51,9 @@ def pascal(doc: dict) -> str:
         out.append("  " + line if line else "")
     out.append("}")
     out.append("")
-    out.append("{ Границы домена. Применяются ядром — здесь они не подсказка,")
-    out.append("  а правило: превышение даёт отказ с кодом из errors.yaml. }")
+    out.append("{ Domain limits. Enforced by the core -- here they are not a")
+    out.append("  hint but a rule: exceeding one is a refusal carrying a code")
+    out.append("  from errors.yaml. }")
     out.append("")
     out.append("const")
 
@@ -73,8 +74,8 @@ def typescript(doc: dict) -> str:
         out.append(" * " + line if line else " *")
     out.append(" */")
     out.append("")
-    out.append("// Подсказка для интерфейса, а не правило: решение всё равно")
-    out.append("// принимает ядро. Проверка на клиенте — удобство пользователя.")
+    out.append("// A hint for the interface, not a rule: the decision is the")
+    out.append("// core's either way. Checking here is a courtesy to the user.")
     out.append("export const LIMITS = {")
     for name, spec in doc["limits"].items():
         camel = "".join(
@@ -91,7 +92,7 @@ def typescript(doc: dict) -> str:
 
 def main() -> int:
     if not SRC.exists():
-        print(f"нет {SRC}", file=sys.stderr)
+        print(f"missing {SRC}", file=sys.stderr)
         return 1
 
     doc = yaml.safe_load(SRC.read_text(encoding="utf-8"))
@@ -103,12 +104,12 @@ def main() -> int:
 
     changed = 0
     for path, text in targets:
-        mark = "изменён" if write(path, text) else "без изменений"
-        if mark == "изменён":
+        mark = "changed" if write(path, text) else "unchanged"
+        if mark == "changed":
             changed += 1
         print(f"  {path.relative_to(ROOT)}  {mark}")
 
-    print(f"границ: {len(doc['limits'])}, файлов изменено: {changed}")
+    print(f"limits: {len(doc['limits'])}, files changed: {changed}")
     return 0
 
 
