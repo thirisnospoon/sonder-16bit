@@ -1,22 +1,22 @@
 /*
- * СГЕНЕРИРОВАНО. Не править руками.
+ * GENERATED. Do not edit by hand.
  *
- * Источник: contracts/errors/errors.yaml
- * Генератор: tools/gen-errors/gen_errors.py
- * Перегенерация: ./sonder codegen
+ * Source:      contracts/errors/errors.yaml
+ * Generator:   tools/gen-errors/gen_errors.py
+ * Regenerate:  ./sonder codegen
  *
- * Правка этого файла будет затёрта, а расхождение с источником
- * поймано проверкой дрейфа в CI.
+ * An edit to this file will be overwritten, and the divergence from
+ * the source caught by the drift check in CI.
  */
 package sonder.contract;
 
 /**
- * Коды отказа. Enum, а не строки: опечатка обязана ломать компиляцию.
+ * Refusal codes. An enum, not strings: a typo must break the build.
  *
- * <p>{@code decidedByCore} говорит, кто принимает решение. Код с
- * {@code true} оболочка возвращать не имеет права — это ответ ядра,
- * и дублирование правила в Java означало бы два места, где живёт
- * одна и та же логика.
+ * <p>{@code decidedByCore} says who takes the decision. A code with
+ * {@code true} is not the shell's to return -- it is the core's
+ * answer, and restating the rule in Java would mean two places
+ * holding one piece of logic.
  */
 public enum ErrorCode {
 

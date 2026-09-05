@@ -1,15 +1,15 @@
-{ СГЕНЕРИРОВАНО. Не править руками.
+{ GENERATED. Do not edit by hand.
 
-  Источник: contracts/errors/errors.yaml
-  Генератор: tools/gen-errors/gen_errors.py
-  Перегенерация: ./sonder codegen
+  Source:      contracts/errors/errors.yaml
+  Generator:   tools/gen-errors/gen_errors.py
+  Regenerate:  ./sonder codegen
 
-  Правка этого файла будет затёрта, а расхождение с источником
-  поймано проверкой дрейфа в CI.
+  An edit to this file will be overwritten, and the divergence from
+  the source caught by the drift check in CI.
 }
 
-{ Коды отказа передаются по линии строками и сравниваются
-  побайтно, поэтому здесь константы, а не перечислимый тип. }
+{ Refusal codes travel the line as strings and are compared
+  byte by byte, so these are constants, not an enumeration. }
 
 const
 
@@ -65,17 +65,17 @@ const
   { --- UPSTREAM --- }
   ERR_GATEWAY_UNAVAILABLE        = 'GATEWAY_UNAVAILABLE';
 
-  { Число кодов: полезно для проверки полноты таблиц. }
+  { How many codes there are: useful for checking a table is complete. }
   ERR_CODE_COUNT = 34;
 
-  { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen
-    из TcResult: добавление длинного кода не должно молча
-    обрезаться при присваивании в TErrCode. }
+  { Length of the longest code. A test compares it against
+    MaxErrCodeLen in TcResult: adding a long code must not be
+    silently truncated on assignment to TErrCode. }
   ERR_MAX_CODE_LEN = 22;
 
-  { Коды, которые возвращает функция решения. По каждому из них
-    golden-набор обязан иметь случай: код, который ничто не
-    порождает, существует только на бумаге. }
+  { Codes returned by the decision function. The golden set
+    must hold a case for each of them: a code nothing
+    produces exists only on paper. }
   ERR_DECISION_CODE_COUNT = 23;
   ErrDecisionCodes: array[1..23] of PChar = (
     'NICK_FORMAT_INVALID',

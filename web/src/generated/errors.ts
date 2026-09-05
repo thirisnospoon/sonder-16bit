@@ -1,16 +1,16 @@
 /*
- * СГЕНЕРИРОВАНО. Не править руками.
+ * GENERATED. Do not edit by hand.
  *
- * Источник: contracts/errors/errors.yaml
- * Генератор: tools/gen-errors/gen_errors.py
- * Перегенерация: ./sonder codegen
+ * Source:      contracts/errors/errors.yaml
+ * Generator:   tools/gen-errors/gen_errors.py
+ * Regenerate:  ./sonder codegen
  *
- * Правка этого файла будет затёрта, а расхождение с источником
- * поймано проверкой дрейфа в CI.
+ * An edit to this file will be overwritten, and the divergence from
+ * the source caught by the drift check in CI.
  */
 
-// Union строковых литералов, а не enum: коды приходят с сервера
-// строками, и union проверяет их ровно на границе.
+// A union of string literals rather than an enum: codes arrive
+// from the server as strings, and a union checks them at the edge.
 export type ErrorCode =
   | 'NICK_FORMAT_INVALID'
   | 'POST_BODY_EMPTY'

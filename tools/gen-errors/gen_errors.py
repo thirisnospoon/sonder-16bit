@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """
-Генерация кодов отказа из contracts/errors/errors.yaml на три языка.
+Generate the refusal codes from contracts/errors/errors.yaml into three
+languages.
 
-Один список кодов существует в четырёх местах — YAML и три языка — и разойтись
-они не имеют права: расхождение означает, что оболочка вернёт клиенту код,
-которого ядро не знает, или наоборот. Поэтому три файла порождаются, а не
-пишутся руками, и правка сгенерированного ловится проверкой дрейфа в CI.
+One list of codes exists in four places -- the YAML and three languages --
+and they have no right to diverge: a divergence means the shell hands the
+client a code the core has never heard of, or the reverse. So the three
+files are generated rather than written, and editing a generated one is
+caught by the drift check in CI.
 
-Особенности целей:
+What each target needs:
 
-  Pascal — include-файл с константами. Ни enum, ни классов: коды передаются
-           по линии как строки, а сравнение идёт побайтно. Дополнительно
-           генерируется функция поиска категории по коду.
+  Pascal -- an include file of constants. No enum, no classes: codes
+            travel the line as strings and are compared byte by byte. A
+            category lookup is generated alongside them.
 
-  Java   — enum с категорией и http-статусом. Именно enum, а не строки:
-           опечатка обязана ломать компиляцию.
+  Java   -- an enum carrying the category and the HTTP status. An enum
+            precisely, not strings: a typo must break the build.
 
-  TS     — union строковых литералов и таблица категорий. Union, а не enum:
-           коды приходят с сервера строками, и union проверяет их на границе.
+  TS     -- a union of string literals plus a table of categories. A
+            union rather than an enum: codes arrive from the server as
+            strings, and a union checks them exactly at the boundary.
 """
 
 from __future__ import annotations
@@ -28,26 +31,26 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("нужен pyyaml", file=sys.stderr)
+    print("pyyaml is required", file=sys.stderr)
     sys.exit(64)
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "contracts" / "errors" / "errors.yaml"
 
 BANNER_LINES = [
-    "СГЕНЕРИРОВАНО. Не править руками.",
+    "GENERATED. Do not edit by hand.",
     "",
-    "Источник: contracts/errors/errors.yaml",
-    "Генератор: tools/gen-errors/gen_errors.py",
-    "Перегенерация: ./sonder codegen",
+    "Source:      contracts/errors/errors.yaml",
+    "Generator:   tools/gen-errors/gen_errors.py",
+    "Regenerate:  ./sonder codegen",
     "",
-    "Правка этого файла будет затёрта, а расхождение с источником",
-    "поймано проверкой дрейфа в CI.",
+    "An edit to this file will be overwritten, and the divergence from",
+    "the source caught by the drift check in CI.",
 ]
 
 
 def write(path: Path, text: str) -> bool:
-    """Пишет байтами с LF. Возвращает True, если содержимое изменилось."""
+    """Write bytes with LF. True when the contents changed."""
     data = text.encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_bytes() == data:
@@ -63,8 +66,8 @@ def pascal(doc: dict) -> str:
         out.append("  " + line if line else "")
     out.append("}")
     out.append("")
-    out.append("{ Коды отказа передаются по линии строками и сравниваются")
-    out.append("  побайтно, поэтому здесь константы, а не перечислимый тип. }")
+    out.append("{ Refusal codes travel the line as strings and are compared")
+    out.append("  byte by byte, so these are constants, not an enumeration. }")
     out.append("")
     out.append("const")
 
@@ -80,24 +83,23 @@ def pascal(doc: dict) -> str:
         out.append(f"  {name:<{width + 4}} = '{entry['code']}';")
 
     out.append("")
-    out.append("  { Число кодов: полезно для проверки полноты таблиц. }")
+    out.append("  { How many codes there are: useful for checking a table is complete. }")
     out.append(f"  ERR_CODE_COUNT = {len(doc['codes'])};")
     out.append("")
-    out.append("  { Длина самого длинного кода. Тест сверяет её с MaxErrCodeLen")
-    out.append("    из TcResult: добавление длинного кода не должно молча")
-    out.append("    обрезаться при присваивании в TErrCode. }")
+    out.append("  { Length of the longest code. A test compares it against")
+    out.append("    MaxErrCodeLen in TcResult: adding a long code must not be")
+    out.append("    silently truncated on assignment to TErrCode. }")
     out.append(f"  ERR_MAX_CODE_LEN = {max(len(c['code']) for c in doc['codes'])};")
 
-    # Коды, которые возвращает ФУНКЦИЯ РЕШЕНИЯ. По каждому golden-набор
-    # обязан иметь случай; полнота проверяется механически, иначе код
-    # существует только на бумаге. Инфраструктурные коды ядра
-    # (decided_by: core-runtime) сюда не попадают: их порождает рантайм,
-    # а не решение.
+    # Codes returned by the DECISION FUNCTION. The golden set must hold a
+    # case for each; completeness is checked mechanically, or a code exists
+    # only on paper. The core's infrastructure codes (decided_by:
+    # core-runtime) stay out: they come from the runtime, not a decision.
     decision = [c["code"] for c in doc["codes"] if c.get("decided_by") == "core"]
     out.append("")
-    out.append("  { Коды, которые возвращает функция решения. По каждому из них")
-    out.append("    golden-набор обязан иметь случай: код, который ничто не")
-    out.append("    порождает, существует только на бумаге. }")
+    out.append("  { Codes returned by the decision function. The golden set")
+    out.append("    must hold a case for each of them: a code nothing")
+    out.append("    produces exists only on paper. }")
     out.append(f"  ERR_DECISION_CODE_COUNT = {len(decision)};")
     out.append(f"  ErrDecisionCodes: array[1..{len(decision)}] of PChar = (")
     for i, code in enumerate(decision):
@@ -117,12 +119,12 @@ def java(doc: dict) -> str:
     out.append("package sonder.contract;")
     out.append("")
     out.append("/**")
-    out.append(" * Коды отказа. Enum, а не строки: опечатка обязана ломать компиляцию.")
+    out.append(" * Refusal codes. An enum, not strings: a typo must break the build.")
     out.append(" *")
-    out.append(" * <p>{@code decidedByCore} говорит, кто принимает решение. Код с")
-    out.append(" * {@code true} оболочка возвращать не имеет права — это ответ ядра,")
-    out.append(" * и дублирование правила в Java означало бы два места, где живёт")
-    out.append(" * одна и та же логика.")
+    out.append(" * <p>{@code decidedByCore} says who takes the decision. A code with")
+    out.append(" * {@code true} is not the shell's to return -- it is the core's")
+    out.append(" * answer, and restating the rule in Java would mean two places")
+    out.append(" * holding one piece of logic.")
     out.append(" */")
     out.append("public enum ErrorCode {")
     out.append("")
@@ -132,7 +134,7 @@ def java(doc: dict) -> str:
     for i, entry in enumerate(doc["codes"]):
         cat = entry["category"]
         http = cats[cat]["http"]
-        # Повторяемость: своё поле кода перекрывает умолчание категории.
+        # Retryability: a code's own field overrides its category's default.
         retryable = str(entry.get("retryable", cats[cat]["retryable"])).lower()
         core = str(entry["decided_by"].startswith("core")).lower()
         desc = " ".join(str(entry["description"]).split())
@@ -178,8 +180,8 @@ def typescript(doc: dict) -> str:
         out.append(" * " + line if line else " *")
     out.append(" */")
     out.append("")
-    out.append("// Union строковых литералов, а не enum: коды приходят с сервера")
-    out.append("// строками, и union проверяет их ровно на границе.")
+    out.append("// A union of string literals rather than an enum: codes arrive")
+    out.append("// from the server as strings, and a union checks them at the edge.")
     out.append("export type ErrorCode =")
     for i, entry in enumerate(doc["codes"]):
         prefix = "  | " if i else "  | "
@@ -213,7 +215,7 @@ def typescript(doc: dict) -> str:
 
 def main() -> int:
     if not SRC.exists():
-        print(f"нет {SRC}", file=sys.stderr)
+        print(f"missing {SRC}", file=sys.stderr)
         return 1
 
     doc = yaml.safe_load(SRC.read_text(encoding="utf-8"))
@@ -228,12 +230,12 @@ def main() -> int:
     for path, text in targets:
         if write(path, text):
             changed += 1
-            mark = "изменён"
+            mark = "changed"
         else:
-            mark = "без изменений"
+            mark = "unchanged"
         print(f"  {path.relative_to(ROOT)}  {mark}")
 
-    print(f"кодов: {len(doc['codes'])}, файлов изменено: {changed}")
+    print(f"codes: {len(doc['codes'])}, files changed: {changed}")
     return 0
 
 

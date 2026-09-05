@@ -24,7 +24,6 @@ contracts/reports/digest-v1.yaml	42
 contracts/soap/decider-v1.wsdl	65
 core/pom.xml	76
 core/src/main/java/sonder/Application.java	7
-core/src/main/java/sonder/contract/ErrorCode.java	11
 core/src/main/java/sonder/gateway/LineTransport.java	74
 core/src/main/java/sonder/gateway/LineTransportConfig.java	33
 core/src/main/java/sonder/gateway/NodeHealth.java	26
@@ -203,7 +202,6 @@ dosnode/src/domain/dmdecide.pas	73
 dosnode/src/domain/dmrules.pas	40
 dosnode/src/generated/dcdsrv.pas	31
 dosnode/src/generated/dcdtypes.pas	17
-dosnode/src/generated/errcodes.inc	15
 dosnode/src/node7.pas	187
 dosnode/src/turbocore/tcarena.pas	102
 dosnode/src/turbocore/tcfiber.pas	67
@@ -330,7 +328,6 @@ spikes/s6-firebird/src/main/java/FirebirdProbe.java	77
 tools/gen-api-types/gen_api_types.py	55
 tools/gen-api-types/gen_events.py	32
 tools/gen-copybook/gen_copybook.py	109
-tools/gen-errors/gen_errors.py	47
 tools/gen-reclen/gen_reclen.py	418
 tools/gen-reclen/selftest.py	98
 tools/validate-contracts/selftest.py	64
@@ -358,7 +355,6 @@ web/src/core/reactive.ts	132
 web/src/core/router.ts	46
 web/src/core/stream.ts	53
 web/src/generated/api.ts	15
-web/src/generated/errors.ts	8
 web/src/generated/events.ts	35
 web/src/generated/paths.ts	11
 web/src/test/api.test.ts	41
