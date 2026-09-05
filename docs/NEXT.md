@@ -21,7 +21,7 @@ conversation, which leaves no trace here.
 ./sonder check-language
 ```
 
-It prints what is left. At the last commit: **368 files, 21 267 lines**
+It prints what is left. At the last commit: **368 files, 21 097 lines**
 (from 374 / 21 410 at the start).
 
 ### The method, and why it is this one
@@ -63,6 +63,22 @@ Files where this matters:
 **Contracts before their generated files.** Translating a generated file
 directly is undone by the next `./sonder codegen` and caught by
 `check-drift`. Translate `contracts/**`, regenerate, commit both.
+
+**Translating text breaks whatever matches on that text.** Learned the
+hard way within an hour: `contracts/errors/errors.yaml` was translated,
+and two cases of the contract validator's own selftest went red -- they
+inject a defect by finding an exact Russian line and could no longer find
+it. The message was honest ("nothing found to corrupt") because that
+selftest was written to say so, which is the only reason it was noticed
+at all. Before translating a file, ask who greps it:
+
+```bash
+grep -rIn "a fragment about to be translated" --exclude-dir=.git .
+```
+
+Places that match on text rather than on structure: `tools/validate-contracts/selftest.py`,
+everything under `ops/ci/falsify/`, the golden assertions in
+`ops/ci/report-test.sh`, and the e2e specs in `web/e2e/`.
 
 **One shim exists and must be removed at the end.** `cmd_check_drift` in
 `sonder` accepts both the Russian and the English spelling of a

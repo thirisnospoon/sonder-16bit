@@ -333,7 +333,7 @@ tools/gen-copybook/gen_copybook.py	109
 tools/gen-errors/gen_errors.py	47
 tools/gen-reclen/gen_reclen.py	418
 tools/gen-reclen/selftest.py	98
-tools/validate-contracts/selftest.py	68
+tools/validate-contracts/selftest.py	64
 tools/validate-contracts/validate.py	148
 tools/wsdl2pas/wsdl2pas.py	128
 web/e2e/a11y.spec.ts	46

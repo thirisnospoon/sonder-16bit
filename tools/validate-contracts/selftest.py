@@ -37,15 +37,15 @@ CASES: list[Case] = [
     (
         "несуществующая категория",
         "contracts/errors/errors.yaml",
-        "    category: CONFLICT\n    description: \"Ник уже занят\"",
-        "    category: НЕТ_ТАКОЙ\n    description: \"Ник уже занят\"",
+        "    category: CONFLICT\n    description: \"The nick is already taken\"",
+        "    category: NO_SUCH_CATEGORY\n    description: \"The nick is already taken\"",
         "несуществующую категорию",
     ),
     (
         "не указано, кто решает",
         "contracts/errors/errors.yaml",
-        "    description: \"Нельзя подписаться на себя\"\n    decided_by: core",
-        "    description: \"Нельзя подписаться на себя\"",
+        "    description: \"One cannot follow oneself\"\n    decided_by: core",
+        "    description: \"One cannot follow oneself\"",
         "не указано, кто его решает",
     ),
     (
