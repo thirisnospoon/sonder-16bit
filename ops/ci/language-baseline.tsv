@@ -192,6 +192,9 @@ docs/bench/latency-read.svg	5
 docs/bench/latency-write.svg	5
 docs/bench/throughput-write.svg	6
 docs/bench/throughput.svg	7
+dosnode/build/build.sh	25
+dosnode/build/compile-generated.sh	40
+dosnode/build/test.sh	36
 dosnode/fuzz/soak-log.tsv	253
 dosnode/fuzz/soak.pas	62
 dosnode/fuzz/soak.sh	120
@@ -312,17 +315,14 @@ spikes/s2-transport/src/s2.pas	39
 spikes/s2-transport/src/s2probe.pas	35
 spikes/s3-headless/run.sh	29
 spikes/s5-iiop/Dockerfile	4
-spikes/s5-iiop/build.log	2
 spikes/s5-iiop/compose.yml	3
 spikes/s5-iiop/idl/enrichment.idl	13
-spikes/s5-iiop/run.log	13
 spikes/s5-iiop/run.sh	10
 spikes/s5-iiop/src/EnrichmentClient.java	43
 spikes/s5-iiop/src/EnrichmentServer.java	13
 spikes/s6-firebird/Dockerfile	2
 spikes/s6-firebird/compose.yml	3
 spikes/s6-firebird/pom.xml	4
-spikes/s6-firebird/run.log	17
 spikes/s6-firebird/run.sh	8
 spikes/s6-firebird/src/main/java/FirebirdProbe.java	77
 tools/gen-api-types/gen_api_types.py	55

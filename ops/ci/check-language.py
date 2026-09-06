@@ -38,8 +38,14 @@ tightened permits re-adding Russian later, up to the old number, in
 silence. Requiring the exact figure keeps the baseline equal to reality
 at every commit, so the diff of the baseline IS the record of progress.
 
-    python ops/ci/check-language.py            check
-    python ops/ci/check-language.py --update   rewrite the baseline
+The list of files to look at arrives on standard input, from git:
+
+    git ls-files --cached --others --exclude-standard \
+      | python ops/ci/check-language.py            check
+    git ls-files --cached --others --exclude-standard \
+      | python ops/ci/check-language.py --update   rewrite the baseline
+
+Use ./sonder check-language, which does that piping for you.
 
 `--update` refuses to raise any number and refuses to add a path. Adding
 Russian therefore requires editing the baseline by hand, where it is
@@ -82,32 +88,31 @@ def is_cyrillic(ch: str) -> bool:
     return any(lo <= code <= hi for lo, hi in CYRILLIC_RANGES)
 
 
-# Directories not worth walking: other people's code and generated
-# output. The same list the shell-identifier check uses, and for the same
-# reason -- there is nothing of ours in them.
-SKIP = {".git", "node_modules", "target", "build", "dist",
-        "test-results", "lighthouse", "out", "playwright-report"}
-
-
 def source_files() -> list[str]:
-    """Walk the tree rather than ask git.
+    """Read the list of paths from standard input, one per line.
 
-    Git is absent from the image these Python checks run in, and its
-    habit of escaping non-ASCII paths has already opened a hole in a
-    neighbouring check -- it silently skipped files with Russian names,
-    which in this project is exactly the set that matters. Walking the
-    filesystem knows nothing of escaping and sees NEW files too, before
-    they reach the index: for a check meant to catch a defect BEFORE the
-    commit, that is the whole point.
+    THE LIST COMES FROM GIT, and the caller supplies it, because git is
+    absent from the image these Python checks run in.
+
+    The first version walked the filesystem instead, and that was wrong
+    in a way that only showed when the working tree was lost and cloned
+    back: the walk counted files git IGNORES. Three `*.log` files from
+    phase-0 spikes sat in the baseline, were never in the repository, and
+    vanished with the tree -- so the ratchet reported progress that had
+    never happened and then complained about a regression that was not
+    one.
+
+    A baseline that counts untracked files measures the machine it runs
+    on rather than the repository. Asking git means one source of truth
+    for what belongs here -- `.gitignore` -- instead of a second list
+    kept in step by hand.
+
+    `--others --exclude-standard` on the caller's side keeps NEW files in
+    view: a file added in the same change must be checked before it is
+    committed, not after.
     """
-    found = []
-    for path in sorted(ROOT.rglob("*")):
-        if any(part in SKIP for part in path.parts):
-            continue
-        if not path.is_file():
-            continue
-        found.append(path.relative_to(ROOT).as_posix())
-    return found
+    return [line.strip() for line in sys.stdin.read().splitlines()
+            if line.strip()]
 
 
 def count_cyrillic_lines(path: Path) -> int:

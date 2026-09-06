@@ -20,7 +20,9 @@ DOS_IMAGE="sonder/dos-toolchain:3.2.2"
 PY_IMAGE="sonder/contracts:1"
 
 run_dos()  { docker run --rm -v "$ROOT:/work" -w /work "$DOS_IMAGE" "$@"; }
-run_py()   { docker run --rm -v "$ROOT:/work" -w /work "$PY_IMAGE"  "$@"; }
+# -i keeps stdin connected: the language check is fed its file list by
+# git through a pipe. Harmless for the checks that read nothing.
+run_py()   { docker run --rm -i -v "$ROOT:/work" -w /work "$PY_IMAGE"  "$@"; }
 
 step() { echo; echo "==> $*"; }
 die()  { echo "ОШИБКА: $*" >&2; exit 1; }
@@ -580,7 +582,21 @@ cmd_check_shell() {
 cmd_check_language() {
   ensure_py
   step "project language"
-  run_py python ops/ci/check-language.py "$@"
+  # THE FILE LIST COMES FROM GIT, piped in, because git is absent from the
+  # image the Python checks run in.
+  #
+  # The first version walked the filesystem inside the container and
+  # counted files git ignores. Three *.log files from phase-0 spikes sat
+  # in the baseline, had never been in the repository, and vanished when
+  # the working tree was lost and cloned back -- so the ratchet had been
+  # reporting progress that never happened, and then reported a
+  # regression that was not one. A baseline counting untracked files
+  # measures the machine, not the repository.
+  #
+  # --others --exclude-standard keeps NEW files in view: a file added in
+  # this very change must be checked before it is committed, not after.
+  git -c core.quotepath=false ls-files --cached --others --exclude-standard \
+    | run_py python ops/ci/check-language.py "$@"
 }
 
 cmd_falsify() {

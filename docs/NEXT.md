@@ -21,7 +21,7 @@ conversation, which leaves no trace here.
 ./sonder check-language
 ```
 
-It prints what is left. At the last commit: **368 files, 21 097 lines**
+It prints what is left. At the last commit: **364 files, 21 016 lines**
 (from 374 / 21 410 at the start).
 
 ### The method, and why it is this one
@@ -115,25 +115,41 @@ gh repo view thirisnospoon/sonder-16bit --json forkCount,stargazerCount
 
 ---
 
-## 2. Outstanding on the GitHub side
+## 2. The GitHub side is settled, and the remote is the only backup
 
-The author email was rewritten to `ben.limitedvision@gmail.com` and the
-co-author trailers were stripped, then force-pushed. **But old objects
-remain reachable on GitHub by exact SHA** -- measured, not assumed:
+The author email throughout the history is `ben.limitedvision@gmail.com`
+and no commit message names any tool.
+
+Getting there took more than a force-push, and the difference is worth
+remembering. Rewriting history and force-pushing leaves the OLD objects
+reachable on GitHub by exact SHA -- measured at the time, not assumed:
+`gh api .../commits/<old sha>` still returned the previous address. Only
+deleting the repository and pushing into a fresh one actually removes
+them. Verified afterwards the same way: the old SHA is gone and the
+server-side history holds exactly one address.
+
+If history is rewritten again -- translating the commit messages will do
+it -- the same applies: a force-push hides, a fresh repository removes.
+
+**The working tree is not a backup, and this is not hypothetical.** On
+2026-09-06 the project directory was found emptied down to a single
+folder that Docker had just re-created as a bind-mount point. Only
+`pascal` was affected; sibling directories were intact; WSL's `/tmp` had
+been cleared as well and containers showed `Exited (255)`, the signature
+of a daemon restart. The cause was never established -- the project's own
+scripts delete nothing but `mktemp` directories and their own `out/`.
+
+Recovery cost nothing because everything was pushed: `git clone` restored
+146 commits and 389 files, and the only loss was one uncommitted edit to
+this file. **Commit and push at every green `verify`,** not at the end of
+a session.
+
+One thing the clone needs on a Windows mount, or every file shows as
+modified:
 
 ```bash
-gh api repos/thirisnospoon/sonder-16bit/commits/3353ec3
+git config core.fileMode false
 ```
-
-still returns the old address. To be rid of them the repository has to be
-deleted and re-created, and the token lacks the `delete_repo` scope. One
-action is needed from the owner:
-
-```bash
-gh auth refresh -s delete_repo      # then the repo can be recreated
-```
-
-or delete it in the web UI and push again.
 
 ---
 
